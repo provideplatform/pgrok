@@ -56,12 +56,12 @@ func main() {
 		}
 	}
 
-	common.Log.Debug("exiting baseline-proxy API")
+	common.Log.Debug("exiting pgrok server")
 	cancelF()
 }
 
 func installSignalHandlers() {
-	common.Log.Debug("installing signal handlers for baseline-proxy API")
+	common.Log.Debug("installing signal handlers for pgrok server")
 	sigs = make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	shutdownCtx, cancelF = context.WithCancel(context.Background())
@@ -69,7 +69,7 @@ func installSignalHandlers() {
 
 func shutdown() {
 	if atomic.AddUint32(&closing, 1) == 1 {
-		common.Log.Debug("shutting down baseline-proxy API")
+		common.Log.Debug("shutting down pgrok server")
 		cancelF()
 	}
 }

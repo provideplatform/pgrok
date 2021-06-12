@@ -11,8 +11,8 @@ import (
 	"github.com/provideplatform/pgrok/common"
 )
 
-const natsStreamingSubscriptionStatusTickerInterval = 5 * time.Second
-const natsStreamingSubscriptionStatusSleepInterval = 250 * time.Millisecond
+const pgrokClientStatusTickerInterval = 5 * time.Second
+const pgrokClientStatusSleepInterval = 250 * time.Millisecond
 
 var (
 	cancelF     context.CancelFunc
@@ -26,33 +26,32 @@ func main() {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	shutdownCtx, cancelF = context.WithCancel(context.Background())
 
-	common.Log.Debugf("running dedicated NATS streaming subscription consumer main()")
-	timer := time.NewTicker(natsStreamingSubscriptionStatusTickerInterval)
+	common.Log.Debugf("running pgrok tunnel")
+	timer := time.NewTicker(pgrokClientStatusTickerInterval)
 	defer timer.Stop()
 
 	for !shuttingDown() {
 		select {
 		case <-timer.C:
-			// TODO: check NATS subscription statuses
+			// TODO: check tunnel status
 		case sig := <-sigs:
 			common.Log.Infof("received signal: %s", sig)
-			common.Log.Warningf("NATS streaming connection subscriptions are not yet being drained...")
 			shutdown()
 		case <-shutdownCtx.Done():
 			close(sigs)
 		// TODO: handle tunnel EOF caused by freemium tunnel expiration
 		default:
-			time.Sleep(natsStreamingSubscriptionStatusSleepInterval)
+			time.Sleep(pgrokClientStatusSleepInterval)
 		}
 	}
 
-	common.Log.Debug("exiting dedicated NATS streaming subscription consumer main()")
+	common.Log.Debug("exiting pgrok tunnel")
 	cancelF()
 }
 
 func shutdown() {
 	if atomic.AddUint32(&closing, 1) == 1 {
-		common.Log.Debug("shutting down dedicated NATS streaming subscription consumer")
+		common.Log.Debug("shutting down pgrok server")
 		cancelF()
 	}
 }
