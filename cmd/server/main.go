@@ -111,7 +111,7 @@ func initListener() {
 	listenAddr = fmt.Sprintf("%s:%s", listenAddr, util.ListenPort)
 	listener, err = net.Listen("tcp", listenAddr)
 	if err != nil {
-		log.Panicf("failed to bind pgrok server listener %d", listenAddr)
+		common.Log.Panicf("failed to bind pgrok server listener %d", listenAddr)
 	}
 	common.Log.Infof("pgrok server listening on %s", listenAddr)
 }
