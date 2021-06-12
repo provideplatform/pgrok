@@ -20,13 +20,12 @@ import (
 	"github.com/kr/pty"
 	"github.com/provideplatform/pgrok/common"
 	"golang.org/x/crypto/ssh"
-
-	util "github.com/provideservices/provide-go/common/util"
 )
 
 const runloopSleepInterval = 250 * time.Millisecond
 const runloopTickInterval = 5000 * time.Millisecond
 
+const sshDefaultListenAddr = "0.0.0.0:8022"
 const sshMaxAuthTries = 1
 
 // const sshRekeyThreshold = 4096
@@ -46,7 +45,7 @@ var (
 )
 
 func init() {
-	util.RequireJWTVerifiers()
+	// util.RequireJWTVerifiers()
 
 	// TODO... something like this:
 	// // You can generate a keypair with 'ssh-keygen -t rsa'
@@ -102,17 +101,17 @@ func main() {
 }
 
 func initListener() {
-	var err error
-	listenAddr := util.ListenAddr
+	listenAddr := os.Getenv("LISTEN_ADDR")
 	if listenAddr == "" {
-		listenAddr = "0.0.0.0"
+		listenAddr = sshDefaultListenAddr
 	}
 
-	listenAddr = fmt.Sprintf("%s:%s", listenAddr, util.ListenPort)
+	var err error
 	listener, err = net.Listen("tcp", listenAddr)
 	if err != nil {
 		common.Log.Panicf("failed to bind pgrok server listener %d", listenAddr)
 	}
+
 	common.Log.Infof("pgrok server listening on %s", listenAddr)
 }
 
@@ -131,25 +130,24 @@ func shutdown() {
 }
 
 func handleChannels(chans <-chan ssh.NewChannel) {
-	// Service the incoming Channel channel in go routine
 	for newChannel := range chans {
 		go handleChannel(newChannel)
 	}
 }
 
-func handleChannel(newChannel ssh.NewChannel) {
+func handleChannel(c ssh.NewChannel) {
 	// Since we're handling a shell, we expect a
 	// channel type of "session". The also describes
 	// "x11", "direct-tcpip" and "forwarded-tcpip"
 	// channel types.
-	if t := newChannel.ChannelType(); t != "session" {
-		newChannel.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %s", t))
+	if t := c.ChannelType(); t != "session" {
+		c.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %s", t))
 		return
 	}
 
 	// At this point, we have the opportunity to reject the client's
 	// request for another logical connection
-	conn, requests, err := newChannel.Accept()
+	conn, requests, err := c.Accept()
 	if err != nil {
 		common.Log.Warningf("failed to access pgrok ssh connection; could not accept channel; %s", err)
 		return
