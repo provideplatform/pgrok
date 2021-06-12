@@ -149,9 +149,9 @@ func handleChannel(newChannel ssh.NewChannel) {
 
 	// At this point, we have the opportunity to reject the client's
 	// request for another logical connection
-	connection, requests, err := newChannel.Accept()
+	conn, requests, err := newChannel.Accept()
 	if err != nil {
-		log.Printf("Could not accept channel (%s)", err)
+		common.Log.Warningf("failed to access pgrok ssh connection; could not accept channel; %s", err)
 		return
 	}
 
@@ -160,31 +160,31 @@ func handleChannel(newChannel ssh.NewChannel) {
 
 	// Prepare teardown function
 	close := func() {
-		connection.Close()
+		conn.Close()
 		_, err := bash.Process.Wait()
 		if err != nil {
-			log.Printf("Failed to exit bash (%s)", err)
+			common.Log.Warningf("failed to accept pgrok ssh connection; could not accept channel; %s", err)
 		}
-		log.Printf("Session closed")
 	}
 
 	// Allocate a terminal for this channel
 	log.Print("allocating pty...")
 	bashf, err := pty.Start(bash)
 	if err != nil {
-		log.Printf("Could not start pty (%s)", err)
+		common.Log.Warningf("failed to allocate pty; %s", err)
 		close()
 		return
 	}
 
-	//pipe session to bash and visa-versa
+	// pipe session to bash and visa-versa
 	var once sync.Once
 	go func() {
-		io.Copy(connection, bashf)
+		io.Copy(conn, bashf)
 		once.Do(close)
 	}()
+
 	go func() {
-		io.Copy(bashf, connection)
+		io.Copy(bashf, conn)
 		once.Do(close)
 	}()
 
@@ -193,8 +193,7 @@ func handleChannel(newChannel ssh.NewChannel) {
 		for req := range requests {
 			switch req.Type {
 			case sshRequestTypeShell:
-				// We only accept the default shell
-				// (i.e. no command in the Payload)
+				// We only accept the default shell (i.e. no command in the payload)
 				if len(req.Payload) == 0 {
 					req.Reply(true, nil)
 				}
@@ -202,8 +201,8 @@ func handleChannel(newChannel ssh.NewChannel) {
 				termLen := req.Payload[3]
 				w, h := parseDimensions(req.Payload[termLen+4:])
 				setWinsize(bashf.Fd(), w, h)
-				// Responding true (OK) here will let the client
-				// know we have a pty ready for input
+
+				// Responding true (OK) here will let the client know we have a pty ready for input
 				req.Reply(true, nil)
 			case sshRequestTypeWindowChange:
 				w, h := parseDimensions(req.Payload)
