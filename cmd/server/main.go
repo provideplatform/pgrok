@@ -70,15 +70,9 @@ func main() {
 		select {
 		case <-timer.C:
 			err := tick()
-			common.Log.Warningf("pgrok ssh connection tick failed; %s", err.Error())
-
-			// for sessionID := range connections {
-			// 	conn := connections[sessionID]
-			// 	err := conn.tick()
-			// 	if err != nil {
-			// 		common.Log.Warningf("pgrok ssh connection tick failed; session id: %s; %s", sessionID, err.Error())
-			// 	}
-			// }
+			if err != nil {
+				common.Log.Warningf("pgrok ssh connection tick failed; %s", err.Error())
+			}
 		case sig := <-sigs:
 			common.Log.Debugf("received signal: %s", sig)
 			listener.Close()
