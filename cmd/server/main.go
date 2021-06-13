@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -68,13 +69,16 @@ func main() {
 	for !shuttingDown() {
 		select {
 		case <-timer.C:
-			for sessionID := range connections {
-				conn := connections[sessionID]
-				err := conn.tick()
-				if err != nil {
-					common.Log.Warningf("pgrok ssh connection tick failed; session id: %s; %s", sessionID, err.Error())
-				}
-			}
+			err := tick()
+			common.Log.Warningf("pgrok ssh connection tick failed; %s", err.Error())
+
+			// for sessionID := range connections {
+			// 	conn := connections[sessionID]
+			// 	err := conn.tick()
+			// 	if err != nil {
+			// 		common.Log.Warningf("pgrok ssh connection tick failed; session id: %s; %s", sessionID, err.Error())
+			// 	}
+			// }
 		case sig := <-sigs:
 			common.Log.Debugf("received signal: %s", sig)
 			listener.Close()
@@ -122,4 +126,19 @@ func shutdown() {
 
 func shuttingDown() bool {
 	return (atomic.LoadUint32(&closing) > 0)
+}
+
+func tick() error {
+	conn, err := listener.Accept()
+	if err != nil {
+		return fmt.Errorf("pgrok listener failed to accept incoming connection; %s", err.Error())
+	}
+
+	_conn, err := sshServerConnFactory(conn)
+	if err != nil {
+		return err
+	}
+
+	common.Log.Debugf("pgrok accepted ssh connection from %s (%s)", _conn.RemoteAddr(), _conn.ClientVersion())
+	return nil
 }

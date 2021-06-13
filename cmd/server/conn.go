@@ -24,21 +24,6 @@ type pgrokConnection struct {
 	reqc     <-chan *ssh.Request
 }
 
-func (p *pgrokConnection) tick() error {
-	conn, err := listener.Accept()
-	if err != nil {
-		return fmt.Errorf("pgrok listener failed to accept incoming connection; %s", err.Error())
-	}
-
-	_conn, err := sshServerConnFactory(conn)
-	if err != nil {
-		return err
-	}
-
-	common.Log.Debugf("pgrok accepted ssh connection from %s (%s)", _conn.RemoteAddr(), _conn.ClientVersion())
-	return nil
-}
-
 func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 	var err error
 	sshconn, ingressc, reqc, err := ssh.NewServerConn(conn, &ssh.ServerConfig{
@@ -172,6 +157,8 @@ func handleChannel(c ssh.NewChannel) {
 		common.Log.Warningf("failed to access pgrok ssh connection; could not accept channel; %s", err)
 		return
 	}
+
+	common.Log.Debugf("bash incoming")
 
 	// Fire up bash for this session
 	bash := exec.Command("bash")
