@@ -171,12 +171,7 @@ func (p *pgrokConnection) repl() {
 	for !p.shuttingDown() {
 		select {
 		case <-timer.C:
-			// n, err := io.Copy(p.conn, externalConn)
-			// io.Copy(externalConn, p.conn)
-
-			// if err != nil {
-			// 	common.Log.Warningf("pgrok ssh connection tick failed; %s", err.Error())
-			// }
+			// no-op
 		case sig := <-p.sigs:
 			common.Log.Debugf("pgrok connection repl received signal: %s", sig)
 			// p.conn.Close()
@@ -260,7 +255,7 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 			go func() {
 				for !shuttingDown() {
 					io.Copy(conn, externalConn)
-					time.Sleep(time.Millisecond * 250)
+					time.Sleep(time.Millisecond * 50)
 				}
 				once.Do(close)
 			}()
@@ -268,7 +263,7 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 			go func() {
 				for !shuttingDown() {
 					io.Copy(externalConn, conn)
-					time.Sleep(time.Millisecond * 250)
+					time.Sleep(time.Millisecond * 50)
 				}
 				once.Do(close)
 			}()
