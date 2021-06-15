@@ -84,7 +84,7 @@ func sshServerConfigFactory(conn net.Conn) *ssh.ServerConfig {
 
 		// NoClientAuth is true if clients are allowed to connect without
 		// authenticating.
-		NoClientAuth: false,
+		NoClientAuth: true,
 
 		// MaxAuthTries specifies the maximum number of authentication attempts
 		// permitted per connection. If set to a negative number, the number of
@@ -108,9 +108,7 @@ func sshServerConfigFactory(conn net.Conn) *ssh.ServerConfig {
 		// Permissions.Extensions entry.
 		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			permissions := &ssh.Permissions{}
-
-			common.Log.Warning("public key callback currently unimplemented")
-
+			// common.Log.Warning("public key callback currently unimplemented")
 			return permissions, nil
 		},
 
