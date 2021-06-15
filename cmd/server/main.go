@@ -24,7 +24,6 @@ const runloopTickInterval = 50 * time.Millisecond
 const sshDefaultListenAddr = "0.0.0.0:8022"
 const sshMaxAuthTries = 1
 
-// const sshRekeyThreshold = 4096
 const sshRequestTypePTY = "pty-req"
 const sshRequestTypeShell = "shell"
 const sshRequestTypeWindowChange = "window-change"

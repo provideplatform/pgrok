@@ -223,27 +223,29 @@ func forward() {
 		dest = nil
 	}
 
+	redial := func() {
+		var err error
+		dest, err = net.Dial("tcp", pgrokDefaultLocalDesinationAddr)
+		if err != nil {
+			common.Log.Warningf("pgrok tunnel client failed to redial local destination address %s; %s", pgrokDefaultLocalDesinationAddr, err.Error())
+		}
+	}
+
 	// pipe
 	go func() {
 		_buf := &bytes.Buffer{}
 		for !shuttingDown() {
 			n, err := io.Copy(_buf, dest)
 			if err != nil {
-				common.Log.Warningf("got err on read from dest... %s", err.Error())
-				dest, err = net.Dial("tcp", pgrokDefaultLocalDesinationAddr)
-				if err != nil {
-					common.Log.Warningf("pgrok tunnel client failed to dial local destination address %s; %s", pgrokDefaultLocalDesinationAddr, err.Error())
-				}
+				common.Log.Warningf("pgrok tunnel client failed to read from local destination address pipe %s; %s", pgrokDefaultLocalDesinationAddr, err.Error())
+				redial()
 			} else {
 				_, err = io.Copy(stdin, _buf)
 				if err != nil {
-					common.Log.Warningf("got err on read from dest... %s", err.Error())
-					dest, err = net.Dial("tcp", pgrokDefaultLocalDesinationAddr)
-					if err != nil {
-						common.Log.Warningf("pgrok tunnel client failed to dial local destination address %s; %s", pgrokDefaultLocalDesinationAddr, err.Error())
-					}
+					common.Log.Warningf("pgrok tunnel client failed to forward local destination address pipe %s; %s", pgrokDefaultLocalDesinationAddr, err.Error())
+					redial()
 				}
-				common.Log.Debugf("read %d bytes", n)
+				common.Log.Tracef("pgrok tunnel client read %d bytes from local destination address: %s", n, pgrokDefaultLocalDesinationAddr)
 			}
 
 			time.Sleep(time.Millisecond * 250)
@@ -256,10 +258,11 @@ func forward() {
 		for !shuttingDown() {
 			n, err := io.Copy(dest, bytes.NewReader(buf.Bytes()[i:]))
 			if err != nil {
-				common.Log.Warningf("got err on write to dest... %s", err.Error())
+				common.Log.Warningf("pgrok tunnel client failed to write to local destination address pipe %s; %s", pgrokDefaultLocalDesinationAddr, err.Error())
+				redial()
 			} else {
 				i += n
-				common.Log.Debugf("wrote %d bytes", n)
+				common.Log.Tracef("pgrok tunnel client wrote %d bytes to local destination address: %s", n, pgrokDefaultLocalDesinationAddr)
 			}
 
 			time.Sleep(time.Millisecond * 250)
