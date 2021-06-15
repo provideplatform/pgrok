@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"os/signal"
@@ -11,11 +12,14 @@ import (
 	"syscall"
 	"time"
 
+	selfsignedcert "github.com/kthomas/go-self-signed-cert"
 	"github.com/provideplatform/pgrok/common"
+	util "github.com/provideservices/provide-go/common/util"
+	"golang.org/x/crypto/ssh"
 )
 
-const runloopSleepInterval = 250 * time.Millisecond
-const runloopTickInterval = 5000 * time.Millisecond
+const runloopSleepInterval = 25 * time.Millisecond
+const runloopTickInterval = 50 * time.Millisecond
 
 const sshDefaultListenAddr = "0.0.0.0:8022"
 const sshMaxAuthTries = 1
@@ -32,26 +36,32 @@ var (
 	sigs        chan os.Signal
 
 	connections map[string]*pgrokConnection
+	keypairs    map[string]*util.JWTKeypair
 	listener    net.Listener
 	mutex       *sync.Mutex
+	signer      ssh.Signer
 )
 
 func init() {
-	// util.RequireJWTVerifiers()
+	keypairs = util.RequireJWTVerifiers()
+	initTLSConfiguration()
+}
 
-	// TODO... something like this:
-	// // You can generate a keypair with 'ssh-keygen -t rsa'
-	// privateBytes, err := ioutil.ReadFile("id_rsa")
-	// if err != nil {
-	// 	log.Fatal("Failed to load private key (./id_rsa)")
-	// }
+func initTLSConfiguration() {
+	keyPath, _, err := selfsignedcert.GenerateToDisk([]string{})
+	if err != nil {
+		common.Log.Panicf("failed to generate self-signed certificate; %s", err.Error())
+	}
 
-	// private, err := ssh.ParsePrivateKey(privateBytes)
-	// if err != nil {
-	// 	log.Fatal("Failed to parse private key")
-	// }
+	privateBytes, err := ioutil.ReadFile(*keyPath)
+	if err != nil {
+		common.Log.Panicf("failed to load private key: %s", *keyPath)
+	}
 
-	// config.AddHostKey(private)
+	signer, err = ssh.ParsePrivateKey(privateBytes)
+	if err != nil {
+		common.Log.Panicf("failed to parse private key; %s", err.Error())
+	}
 }
 
 func main() {
@@ -69,14 +79,10 @@ func main() {
 	for !shuttingDown() {
 		select {
 		case <-timer.C:
-			err := tick()
-			if err != nil {
-				common.Log.Warningf("pgrok ssh connection tick failed; %s", err.Error())
-			}
+			go tick()
 		case sig := <-sigs:
 			common.Log.Debugf("received signal: %s", sig)
 			listener.Close()
-			// TODO: flush and make sure everything gracefully exits
 			shutdown()
 		case <-shutdownCtx.Done():
 			close(sigs)
@@ -127,6 +133,12 @@ func tick() error {
 	if err != nil {
 		return fmt.Errorf("pgrok listener failed to accept incoming connection; %s", err.Error())
 	}
+
+	common.Log.Debugf("pgrok server accepted client connection from %s", conn.RemoteAddr())
+
+	// marshal packet containing JWT
+	// verify JWT
+	//
 
 	_conn, err := sshServerConnFactory(conn)
 	if err != nil {

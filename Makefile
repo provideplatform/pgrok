@@ -1,4 +1,4 @@
-.PHONY: build clean install mod run_server stop_local test
+.PHONY: build clean install mod serve stop_local test
 
 clean:
 	rm -rf ./.bin 2>/dev/null || true
@@ -22,8 +22,8 @@ mod:
 	go mod tidy
 	go mod vendor 
 
-run_api: build run_local_dependencies
-	./ops/run_api.sh
+serve: build
+	./ops/run_server.sh
 
 stop_local:
 	./ops/stop_local.sh

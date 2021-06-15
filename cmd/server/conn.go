@@ -1,32 +1,64 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
-	"os/exec"
+	"os"
+	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
-	"github.com/kr/pty"
 	"github.com/provideplatform/pgrok/common"
 	"golang.org/x/crypto/ssh"
 )
 
 // pgrokConnect maps ssh connections to underlying server conn and channel/request channels
 type pgrokConnection struct {
-	conn     *ssh.ServerConn
-	ingressc <-chan ssh.NewChannel
-	reqc     <-chan *ssh.Request
+	cancelF     context.CancelFunc
+	closing     uint32
+	mutex       *sync.Mutex
+	shutdownCtx context.Context
+	sigs        chan os.Signal
+
+	conn         *ssh.ServerConn
+	externalConn net.Conn
+	ingressc     <-chan ssh.NewChannel
+	reqc         <-chan *ssh.Request
 }
 
 func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 	var err error
-	sshconn, ingressc, reqc, err := ssh.NewServerConn(conn, &ssh.ServerConfig{
+	sshconn, ingressc, reqc, err := ssh.NewServerConn(conn, sshServerConfigFactory(conn))
+
+	if err != nil {
+		common.Log.Warningf("failed to initialize pgrok ssh server connection; failed to complete handshake; %s", err.Error())
+		return nil, err
+	}
+
+	// TODO-- buffer this...
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	pconn := &pgrokConnection{
+		conn:     sshconn,
+		ingressc: ingressc,
+		reqc:     reqc,
+	}
+	connections[string(sshconn.SessionID())] = pconn
+	go pconn.repl()
+
+	return sshconn, nil
+}
+
+func sshServerConfigFactory(conn net.Conn) *ssh.ServerConfig {
+	cfg := &ssh.ServerConfig{
 
 		// Rand provides the source of entropy for cryptographic
 		// primitives. If Rand is nil, the cryptographic random reader
@@ -78,7 +110,6 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 			permissions := &ssh.Permissions{}
 
 			common.Log.Warning("public key callback currently unimplemented")
-			// TODO...
 
 			return permissions, nil
 		},
@@ -103,7 +134,7 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 		// If empty, a reasonable default is used.
 		// Note that RFC 4253 section 4.2 requires that this string start with
 		// "SSH-2.0-".
-		// ServerVersion string
+		ServerVersion: "SSH-2.0-pgrok",
 
 		// BannerCallback, if present, is called and the return string is sent to
 		// the client after key exchange completed but before authentication.
@@ -113,34 +144,82 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 		// when gssapi-with-mic authentication is selected (RFC 4462 section 3).
 		// GSSAPIWithMICConfig *GSSAPIWithMICConfig
 		// contains filtered or unexported fields
-	})
-
-	if err != nil {
-		common.Log.Warningf("failed to initialize pgrok ssh server connection; failed to complete handshake; %s", err.Error())
-		return nil, err
 	}
 
-	// TODO-- buffer this...
-	mutex.Lock()
-	defer mutex.Unlock()
-	connections[string(sshconn.SessionID())] = &pgrokConnection{
-		conn:     sshconn,
-		ingressc: ingressc,
-		reqc:     reqc,
+	for kid := range keypairs {
+		key := keypairs[kid]
+		cfg.AddHostKey(key.SSHSigner())
+		common.Log.Debugf("added ssh host key: %s", key.Fingerprint)
 	}
 
-	// go ssh.DiscardRequests(reqc)
-	go handleChannels(ingressc)
+	cfg.AddHostKey(signer)
+	common.Log.Debug("added default ssh host key")
 
-	return sshconn, nil
+	return cfg
 }
-func handleChannels(chans <-chan ssh.NewChannel) {
+
+func (p *pgrokConnection) repl() {
+	common.Log.Debugf("starting pgrok connection repl...")
+	p.installSignalHandlers()
+
+	p.mutex = &sync.Mutex{}
+
+	go ssh.DiscardRequests(p.reqc)
+	go p.handleChannels(p.ingressc)
+
+	timer := time.NewTicker(runloopTickInterval)
+	defer timer.Stop()
+
+	for !p.shuttingDown() {
+		select {
+		case <-timer.C:
+			// n, err := io.Copy(p.conn, externalConn)
+			// io.Copy(externalConn, p.conn)
+
+			// if err != nil {
+			// 	common.Log.Warningf("pgrok ssh connection tick failed; %s", err.Error())
+			// }
+		case sig := <-p.sigs:
+			common.Log.Debugf("pgrok connection repl received signal: %s", sig)
+			// p.conn.Close()
+			listener.Close()
+			p.shutdown()
+		case <-p.shutdownCtx.Done():
+			close(p.sigs)
+		default:
+			time.Sleep(runloopSleepInterval)
+		}
+	}
+
+	common.Log.Debug("exiting pgrok connection repl")
+	p.cancelF()
+}
+
+func (p *pgrokConnection) installSignalHandlers() {
+	common.Log.Debug("installing signal handlers for pgrok tunnel connection")
+	p.sigs = make(chan os.Signal, 1)
+	signal.Notify(p.sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	p.shutdownCtx, p.cancelF = context.WithCancel(context.Background())
+}
+
+func (p *pgrokConnection) shutdown() {
+	if atomic.AddUint32(&p.closing, 1) == 1 {
+		common.Log.Debug("shutting down pgrok tunnel connection")
+		p.cancelF()
+	}
+}
+
+func (p *pgrokConnection) shuttingDown() bool {
+	return (atomic.LoadUint32(&p.closing) > 0)
+}
+
+func (p *pgrokConnection) handleChannels(chans <-chan ssh.NewChannel) {
 	for c := range chans {
-		go handleChannel(c)
+		go p.handleChannel(c)
 	}
 }
 
-func handleChannel(c ssh.NewChannel) {
+func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 	// Since we're handling a shell, we expect a
 	// channel type of "session". The also describes
 	// "x11", "direct-tcpip" and "forwarded-tcpip"
@@ -158,60 +237,67 @@ func handleChannel(c ssh.NewChannel) {
 		return
 	}
 
-	common.Log.Debugf("bash incoming")
-
-	// Fire up bash for this session
-	bash := exec.Command("bash")
-
-	// Prepare teardown function
-	close := func() {
-		conn.Close()
-		_, err := bash.Process.Wait()
-		if err != nil {
-			common.Log.Warningf("failed to accept pgrok ssh connection; could not accept channel; %s", err)
-		}
-	}
-
-	// Allocate a terminal for this channel
-	log.Print("allocating pty...")
-	bashf, err := pty.Start(bash)
+	external, err := net.Listen("tcp", ":0")
 	if err != nil {
-		common.Log.Warningf("failed to allocate pty; %s", err)
-		close()
-		return
+		common.Log.Warningf("pgrok server failed to bind external listener on next ephemeral port; %s", err.Error())
+		// return err
 	}
-
-	// pipe session to bash and visa-versa
-	var once sync.Once
-	go func() {
-		io.Copy(conn, bashf)
-		once.Do(close)
-	}()
+	common.Log.Debugf("pgrok server bound external listener: %s", external.Addr().String())
 
 	go func() {
-		io.Copy(bashf, conn)
-		once.Do(close)
+		for !shuttingDown() {
+			externalConn, err := external.Accept()
+			if err != nil {
+				common.Log.Warningf("pgrok server failed to accept connection on external listener; %s", err.Error())
+				break
+			}
+
+			close := func() {
+				conn.Close()
+				externalConn.Close()
+			}
+
+			// pipe
+			var once sync.Once
+			go func() {
+				for !shuttingDown() {
+					io.Copy(conn, externalConn)
+					time.Sleep(time.Millisecond * 250)
+				}
+				once.Do(close)
+			}()
+
+			go func() {
+				for !shuttingDown() {
+					io.Copy(externalConn, conn)
+					time.Sleep(time.Millisecond * 250)
+				}
+				once.Do(close)
+			}()
+
+			time.Sleep(time.Millisecond * 100)
+		}
 	}()
 
-	// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
+	// sessions have out-of-band requests such as "shell", "pty-req" and "env"
 	go func() {
 		for req := range requests {
 			switch req.Type {
 			case sshRequestTypeShell:
-				// We only accept the default shell (i.e. no command in the payload)
+				// only accept the default shell (i.e. no command in the payload)
 				if len(req.Payload) == 0 {
 					req.Reply(true, nil)
 				}
 			case sshRequestTypePTY:
-				termLen := req.Payload[3]
-				w, h := parseDimensions(req.Payload[termLen+4:])
-				setWinsize(bashf.Fd(), w, h)
+				// termLen := req.Payload[3]
+				// w, h := parseDimensions(req.Payload[termLen+4:])
+				// setWinsize(bashf.Fd(), w, h)
 
-				// Responding true (OK) here will let the client know we have a pty ready for input
+				// tell client that pty is ready for input
 				req.Reply(true, nil)
 			case sshRequestTypeWindowChange:
-				w, h := parseDimensions(req.Payload)
-				setWinsize(bashf.Fd(), w, h)
+				// w, h := parseDimensions(req.Payload)
+				// setWinsize(bashf.Fd(), w, h)
 			}
 		}
 	}()
