@@ -268,7 +268,7 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 				once.Do(close)
 			}()
 
-			time.Sleep(time.Millisecond * 100)
+			time.Sleep(time.Millisecond * 500)
 		}
 	}()
 
