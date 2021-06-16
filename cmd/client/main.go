@@ -20,6 +20,8 @@ import (
 const maxRetries = 5
 
 const pgrokClientDestinationReachabilityTimeout = 500 * time.Millisecond
+const pgrokClientDestinationReadDeadlineInterval = time.Millisecond * 1000
+const pgrokClientDestinationWriteDeadlineInterval = time.Millisecond * 1000
 const pgrokClientStatusTickerInterval = 25 * time.Millisecond
 const pgrokClientStatusSleepInterval = 50 * time.Millisecond
 const pgrokConnSleepTimeout = time.Millisecond * 250
@@ -249,31 +251,33 @@ func forward() {
 		dest = nil
 	}
 
-	redial := func() {
-		if dest != nil {
-			common.Log.Tracef("pgrok tunnel client closing pipe to local destination: %s", *destAddr)
-			dest.Close()
-		}
+	// redial := func() {
+	// 	if dest != nil {
+	// 		common.Log.Tracef("pgrok tunnel client closing pipe to local destination: %s", *destAddr)
+	// 		dest.Close()
+	// 	}
 
-		var err error
-		dest, err = net.Dial("tcp", *destAddr)
-		if err != nil {
-			common.Log.Warningf("pgrok tunnel client failed to redial local destination address %s; %s", *destAddr, err.Error())
-		}
-	}
+	// 	var err error
+	// 	dest, err = net.Dial("tcp", *destAddr)
+	// 	if err != nil {
+	// 		common.Log.Warningf("pgrok tunnel client failed to redial local destination address %s; %s", *destAddr, err.Error())
+	// 	}
+	// }
 
 	// pipe
 	go func() {
 		i := int64(0)
 		for !shuttingDown() {
-			// dest.SetWriteDeadline(time.Now().Add(time.Millisecond * 1000))
-			n, err := io.Copy(dest, buf)
-			if err != nil {
-				common.Log.Warningf("pgrok tunnel client failed to write to local destination address pipe %s; %s", *destAddr, err.Error())
-				redial()
-			} else {
-				i += n
-				common.Log.Tracef("pgrok tunnel client wrote %d bytes to local destination address: %s", n, *destAddr)
+			if buf.Len() > 0 {
+				dest.SetWriteDeadline(time.Now().Add(pgrokClientDestinationWriteDeadlineInterval))
+				n, err := io.Copy(dest, buf)
+				if err != nil {
+					common.Log.Warningf("pgrok tunnel client failed to write to local destination address pipe %s; %s", *destAddr, err.Error())
+					// redial()
+				} else {
+					i += n
+					common.Log.Tracef("pgrok tunnel client wrote %d bytes to local destination address: %s", n, *destAddr)
+				}
 			}
 
 			time.Sleep(pgrokConnSleepTimeout)
@@ -282,22 +286,13 @@ func forward() {
 	}()
 
 	go func() {
-		// _buf := &bytes.Buffer{}
 		for !shuttingDown() {
-			// dest.SetReadDeadline(time.Now().Add(time.Millisecond * 1000))
+			dest.SetReadDeadline(time.Now().Add(pgrokClientDestinationReadDeadlineInterval))
 			_, err := io.Copy(stdin, dest)
 			if err != nil {
 				common.Log.Warningf("pgrok tunnel client failed to read from local destination address pipe %s; %s", *destAddr, err.Error())
-				redial()
+				// redial()
 			}
-			// else {
-			// 	_, err = io.Copy(stdin, _buf)
-			// 	if err != nil {
-			// 		common.Log.Warningf("pgrok tunnel client failed to forward local destination address pipe %s; %s", *destAddr, err.Error())
-			// 		redial()
-			// 	}
-			// 	common.Log.Tracef("pgrok tunnel client read %d bytes from local destination address: %s", n, *destAddr)
-			// }
 
 			time.Sleep(pgrokConnSleepTimeout)
 		}
