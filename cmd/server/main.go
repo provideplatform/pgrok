@@ -144,6 +144,6 @@ func tick() error {
 		return err
 	}
 
-	common.Log.Debugf("pgrok accepted ssh connection from %s (%s)", _conn.RemoteAddr(), _conn.ClientVersion())
+	common.Log.Debugf("pgrok server accepted ssh connection handshake from %s (%s)", _conn.RemoteAddr(), _conn.ClientVersion())
 	return nil
 }
