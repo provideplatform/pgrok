@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -43,6 +44,7 @@ var (
 	retries    int
 	serverAddr *string
 	session    *ssh.Session
+	sessionID  *string
 
 	stderr io.Reader
 	stdin  io.Writer
@@ -189,7 +191,9 @@ func initSession() {
 		client.Close()
 		common.Log.Panicf("pgrok tunnel client failed to open session; %s", err.Error())
 	}
-	common.Log.Debugf("pgrok tunnel session established: %v", hex.EncodeToString(client.SessionID()))
+
+	sessionID = common.StringOrNil(hex.EncodeToString(client.SessionID()))
+	common.Log.Debugf("pgrok tunnel session established: %s", *sessionID)
 
 	stdin, err = session.StdinPipe()
 	if err != nil {
@@ -242,6 +246,14 @@ func initDestinationConn() {
 	}
 }
 
+func initChannel() {
+	channel, _, err := client.OpenChannel(fmt.Sprintf("session:%s", *sessionID), []byte{})
+	if err != nil {
+		common.Log.Warningf("pgrok tunnel client failed to open channel; %s", err.Error())
+	}
+	common.Log.Debugf("pgrok tunnel client opened channel: %v", channel)
+}
+
 func forward() {
 	initDestinationConn()
 	var once sync.Once
@@ -269,7 +281,7 @@ func forward() {
 		i := int64(0)
 		for !shuttingDown() {
 			if buf.Len() > 0 {
-				dest.SetWriteDeadline(time.Now().Add(pgrokClientDestinationWriteDeadlineInterval))
+				// dest.SetWriteDeadline(time.Now().Add(pgrokClientDestinationWriteDeadlineInterval))
 				n, err := io.Copy(dest, buf)
 				if err != nil {
 					common.Log.Warningf("pgrok tunnel client failed to write to local destination address pipe %s; %s", *destAddr, err.Error())
@@ -287,7 +299,7 @@ func forward() {
 
 	go func() {
 		for !shuttingDown() {
-			dest.SetReadDeadline(time.Now().Add(pgrokClientDestinationReadDeadlineInterval))
+			// dest.SetReadDeadline(time.Now().Add(pgrokClientDestinationReadDeadlineInterval))
 			_, err := io.Copy(stdin, dest)
 			if err != nil {
 				common.Log.Warningf("pgrok tunnel client failed to read from local destination address pipe %s; %s", *destAddr, err.Error())

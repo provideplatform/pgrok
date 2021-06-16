@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -28,6 +30,7 @@ type pgrokConnection struct {
 	sigs        chan os.Signal
 
 	conn         *ssh.ServerConn
+	external     net.Listener
 	externalConn net.Conn
 	ingressc     <-chan ssh.NewChannel
 	reqc         <-chan *ssh.Request
@@ -36,22 +39,30 @@ type pgrokConnection struct {
 func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 	var err error
 	sshconn, ingressc, reqc, err := ssh.NewServerConn(conn, sshServerConfigFactory(conn))
-
 	if err != nil {
 		common.Log.Warningf("failed to initialize pgrok ssh server connection; failed to complete handshake; %s", err.Error())
 		return nil, err
 	}
 
+	sessionID := hex.EncodeToString(sshconn.SessionID())
+
 	// TODO-- buffer this...
 	mutex.Lock()
 	defer mutex.Unlock()
 
+	external, err := net.Listen("tcp", ":0")
+	if err != nil {
+		common.Log.Warningf("pgrok server failed to bind external listener on next ephemeral port; %s", err.Error())
+	}
+	common.Log.Debugf("pgrok server bound external listener: %s", external.Addr().String())
+
 	pconn := &pgrokConnection{
 		conn:     sshconn,
+		external: external,
 		ingressc: ingressc,
 		reqc:     reqc,
 	}
-	connections[string(sshconn.SessionID())] = pconn
+	connections[sessionID] = pconn
 	go pconn.repl()
 
 	return sshconn, nil
@@ -217,36 +228,40 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 	// channel type of "session". The also describes
 	// "x11", "direct-tcpip" and "forwarded-tcpip"
 	// channel types.
-	if t := c.ChannelType(); t != "session" {
+	if t := c.ChannelType(); !strings.HasPrefix(t, "session") {
 		c.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %s", t))
 		return
 	}
 
+	parts := strings.Split(c.ChannelType(), ":")
+	channelSessionID := parts[len(parts)-1]
+	if _, pgconnOk := connections[channelSessionID]; pgconnOk {
+		msg := fmt.Sprintf("resolved existing pgrok ssh connection for session id: %s", channelSessionID)
+		common.Log.Debug(msg)
+		// c.Reject(ssh.Prohibited, msg)
+		// accept()
+	} else {
+		// accept()
+	}
+
 	// At this point, we have the opportunity to reject the client's
 	// request for another logical connection
-	conn, requests, err := c.Accept()
+	channel, requests, err := c.Accept()
 	if err != nil {
 		common.Log.Warningf("failed to access pgrok ssh connection; could not accept channel; %s", err)
 		return
 	}
 
-	external, err := net.Listen("tcp", ":0")
-	if err != nil {
-		common.Log.Warningf("pgrok server failed to bind external listener on next ephemeral port; %s", err.Error())
-		// return err
-	}
-	common.Log.Debugf("pgrok server bound external listener: %s", external.Addr().String())
-
 	go func() {
 		for !shuttingDown() {
-			externalConn, err := external.Accept()
+			externalConn, err := p.external.Accept()
 			if err != nil {
 				common.Log.Warningf("pgrok server failed to accept connection on external listener; %s", err.Error())
 				break
 			}
 
 			close := func() {
-				conn.Close()
+				channel.Close()
 				externalConn.Close()
 			}
 
@@ -254,7 +269,7 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 			var once sync.Once
 			go func() {
 				for !shuttingDown() {
-					io.Copy(conn, externalConn)
+					io.Copy(channel, externalConn)
 					time.Sleep(time.Millisecond * 50)
 				}
 				once.Do(close)
@@ -262,13 +277,13 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 
 			go func() {
 				for !shuttingDown() {
-					io.Copy(externalConn, conn)
+					io.Copy(externalConn, channel)
 					time.Sleep(time.Millisecond * 50)
 				}
 				once.Do(close)
 			}()
 
-			time.Sleep(time.Millisecond * 500)
+			time.Sleep(time.Millisecond * 250)
 		}
 	}()
 
