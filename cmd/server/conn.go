@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,7 +15,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/provideplatform/pgrok/common"
 	"golang.org/x/crypto/ssh"
@@ -352,24 +350,24 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 }
 
 // parseDimensions extracts terminal dimensions (width x height) from the provided buffer.
-func parseDimensions(b []byte) (uint32, uint32) {
-	w := binary.BigEndian.Uint32(b)
-	h := binary.BigEndian.Uint32(b[4:])
-	return w, h
-}
+// func parseDimensions(b []byte) (uint32, uint32) {
+// 	w := binary.BigEndian.Uint32(b)
+// 	h := binary.BigEndian.Uint32(b[4:])
+// 	return w, h
+// }
 
 // ======================
 
 // winsize stores the height and width of a terminal.
-type winsize struct {
-	Height uint16
-	Width  uint16
-	x      uint16 // unused
-	y      uint16 // unused
-}
+// type winsize struct {
+// 	Height uint16
+// 	Width  uint16
+// 	x      uint16 // unused
+// 	y      uint16 // unused
+// }
 
 // setWinsize sets the size of the given pty.
-func setWinsize(fd uintptr, w, h uint32) {
-	ws := &winsize{Width: uint16(w), Height: uint16(h)}
-	syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(syscall.TIOCSWINSZ), uintptr(unsafe.Pointer(ws)))
-}
+// func setWinsize(fd uintptr, w, h uint32) {
+// 	ws := &winsize{Width: uint16(w), Height: uint16(h)}
+// 	syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(syscall.TIOCSWINSZ), uintptr(unsafe.Pointer(ws)))
+// }
