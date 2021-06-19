@@ -227,7 +227,7 @@ func (p *pgrokConnection) shuttingDown() bool {
 
 func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 	if c == nil {
-		c.Reject(ssh.UnknownChannelType, "nil channel")
+		// c.Reject(ssh.UnknownChannelType, "nil channel")
 		return
 	}
 
