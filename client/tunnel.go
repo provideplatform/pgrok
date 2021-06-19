@@ -29,20 +29,23 @@ const pgrokDefaultServerAddr = "localhost:8022" // TODO-- update to use pgrok.pr
 const pgrokDefaultLocalDesinationAddr = "localhost:4222"
 
 type Tunnel struct {
+	Name       *string
+	Protocol   *string
+	LocalAddr  *string
+	ServerAddr *string
+
 	cancelF     context.CancelFunc
 	closing     uint32
 	shutdownCtx context.Context
 
-	client     *ssh.Client
-	channel    ssh.Channel
-	config     *ssh.ClientConfig
-	dest       net.Conn
-	destAddr   *string
-	mutex      *sync.Mutex
-	retries    int
-	serverAddr *string
-	session    *ssh.Session
-	sessionID  *string
+	client    *ssh.Client
+	channel   ssh.Channel
+	config    *ssh.ClientConfig
+	dest      net.Conn
+	mutex     *sync.Mutex
+	retries   int
+	session   *ssh.Session
+	sessionID *string
 
 	stderr io.Reader
 	stdin  io.Writer
@@ -58,7 +61,7 @@ func (t *Tunnel) main() {
 	t.mutex = &sync.Mutex{}
 
 	var err error
-	t.client, err = ssh.Dial("tcp", *t.serverAddr, sshClientConfigFactory())
+	t.client, err = ssh.Dial("tcp", *t.ServerAddr, sshClientConfigFactory())
 	if err != nil {
 		common.Log.Panicf("pgrok tunnel client failed to connect; %s", err.Error())
 	}
@@ -219,9 +222,9 @@ func (t *Tunnel) initDestinationConn() {
 	}
 
 	var err error
-	t.dest, err = net.Dial("tcp", *t.destAddr)
+	t.dest, err = net.Dial("tcp", *t.LocalAddr)
 	if err != nil {
-		common.Log.Warningf("pgrok tunnel client failed to dial local destination address %s; %s", *t.destAddr, err.Error())
+		common.Log.Warningf("pgrok tunnel client failed to dial local destination address %s; %s", *t.LocalAddr, err.Error())
 	}
 }
 
@@ -256,15 +259,15 @@ func (t *Tunnel) forward() {
 
 	redial := func() {
 		if t.dest != nil {
-			common.Log.Tracef("pgrok tunnel client closing pipe to local destination: %s", *t.destAddr)
+			common.Log.Tracef("pgrok tunnel client closing pipe to local destination: %s", *t.LocalAddr)
 			t.dest.Close()
 			t.dest = nil
 		}
 
 		var err error
-		t.dest, err = net.Dial("tcp", *t.destAddr)
+		t.dest, err = net.Dial("tcp", *t.LocalAddr)
 		if err != nil {
-			common.Log.Warningf("pgrok tunnel client failed to redial local destination address %s; %s", *t.destAddr, err.Error())
+			common.Log.Warningf("pgrok tunnel client failed to redial local destination address %s; %s", *t.LocalAddr, err.Error())
 		}
 	}
 
@@ -281,15 +284,15 @@ func (t *Tunnel) forward() {
 							redial()
 						}
 					} else if n > 0 {
-						common.Log.Tracef("pgrok tunnel client wrote %d bytes from channel to local destination (%s)", n, *t.destAddr)
+						common.Log.Tracef("pgrok tunnel client wrote %d bytes from channel to local destination (%s)", n, *t.LocalAddr)
 						i, err := t.dest.Write(buffer[0:n])
 						if err != nil {
-							common.Log.Warningf("pgrok tunnel client failed to write %d bytes from local destination (%s) to channel; %s", n, *t.destAddr, err.Error())
+							common.Log.Warningf("pgrok tunnel client failed to write %d bytes from local destination (%s) to channel; %s", n, *t.LocalAddr, err.Error())
 							if errors.Is(err, syscall.EPIPE) {
 								redial()
 							}
 						} else {
-							common.Log.Tracef("pgrok tunnel client wrote %d bytes from local destination (%s) to channel", i, *t.destAddr)
+							common.Log.Tracef("pgrok tunnel client wrote %d bytes from local destination (%s) to channel", i, *t.LocalAddr)
 						}
 					}
 
@@ -336,7 +339,7 @@ func (t *Tunnel) forward() {
 			var n int
 			buffer := make([]byte, 256)
 			if n, err = t.dest.Read(buffer); err != nil && err != io.EOF {
-				common.Log.Warningf("pgrok tunnel client failed to read from local destination (%s); %s", *t.destAddr, err.Error())
+				common.Log.Warningf("pgrok tunnel client failed to read from local destination (%s); %s", *t.LocalAddr, err.Error())
 				if errors.Is(err, syscall.EPIPE) {
 					redial()
 				}
@@ -344,12 +347,12 @@ func (t *Tunnel) forward() {
 				i, err := t.channel.Write(buffer[0:n])
 				_, err = t.stdin.Write(buffer[0:n])
 				if err != nil {
-					common.Log.Warningf("pgrok tunnel client failed to write %d bytes from local destination (%s) to channel; %s", n, *t.destAddr, err.Error())
+					common.Log.Warningf("pgrok tunnel client failed to write %d bytes from local destination (%s) to channel; %s", n, *t.LocalAddr, err.Error())
 					if errors.Is(err, syscall.EPIPE) {
 						redial()
 					}
 				} else {
-					common.Log.Tracef("pgrok tunnel client wrote %d bytes from local destination (%s) to channel", i, *t.destAddr)
+					common.Log.Tracef("pgrok tunnel client wrote %d bytes from local destination (%s) to channel", i, *t.LocalAddr)
 				}
 			}
 
@@ -362,9 +365,9 @@ func (t *Tunnel) forward() {
 // checkDestinationReachability just logs a warning as of now if the destination address is not currently reachable;
 // i.e., if localhost:4222 is not up when this is called, it will log a warning
 func (t *Tunnel) checkDestinationReachability() {
-	conn, err := net.DialTimeout("tcp", *t.destAddr, pgrokClientDestinationReachabilityTimeout)
+	conn, err := net.DialTimeout("tcp", *t.LocalAddr, pgrokClientDestinationReachabilityTimeout)
 	if err != nil {
-		common.Log.Warningf("pgrok tunnel client destination address unreachable: %s; %s", *t.destAddr, err.Error())
+		common.Log.Warningf("pgrok tunnel client destination address unreachable: %s; %s", *t.LocalAddr, err.Error())
 		return
 	}
 	conn.Close()

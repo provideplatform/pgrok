@@ -1,5 +1,7 @@
 package client
 
+import "github.com/provideplatform/pgrok/common"
+
 // Client is the pgrok tunnel client
 type Client struct {
 	tunnels []*Tunnel
@@ -13,11 +15,20 @@ func Factory() (*Client, error) {
 }
 
 // TunnelFactory initializes a new pgrok client Tunnel
-func (c *Client) TunnelFactory(destAddr, serverAddr string) (*Tunnel, error) {
-	return &Tunnel{
-		destAddr:   &destAddr,
-		serverAddr: &serverAddr,
-	}, nil
+func (c *Client) TunnelFactory(name, destAddr string, serverAddr *string) (*Tunnel, error) {
+	tun := &Tunnel{
+		Name:      &name,
+		Protocol:  common.StringOrNil("tcp"), // only tcp support at this time
+		LocalAddr: &destAddr,
+	}
+
+	if serverAddr != nil {
+		tun.ServerAddr = serverAddr
+	} else {
+		tun.ServerAddr = common.StringOrNil(pgrokDefaultServerAddr)
+	}
+
+	return tun, nil
 }
 
 // AddTunnel adds a new tunnel to the pgrok client

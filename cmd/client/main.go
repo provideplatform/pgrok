@@ -23,17 +23,25 @@ const pgrokConnSleepTimeout = time.Millisecond * 250
 const pgrokConnSessionBufferSleepTimeout = time.Millisecond * 250
 const pgrokDefaultServerAddr = "localhost:8022" // TODO-- update to use pgrok.provide.services
 const pgrokDefaultLocalDesinationAddr = "localhost:4222"
+const pgrokDefaultTunnelName = "default-tunnel"
 
 var (
 	cancelF     context.CancelFunc
 	closing     uint32
 	shutdownCtx context.Context
 
+	name       string
 	destAddr   string
 	serverAddr string
 )
 
 func init() {
+	if os.Getenv("PGROK_TUNNEL_NAME") != "" {
+		name = os.Getenv("PGROK_TUNNEL_NAME")
+	} else {
+		name = pgrokDefaultTunnelName
+	}
+
 	if os.Getenv("PGROK_LOCAL_DESTINATION_ADDRESS") != "" {
 		destAddr = os.Getenv("PGROK_LOCAL_DESTINATION_ADDRESS")
 	} else {
@@ -55,7 +63,7 @@ func main() {
 
 	client, _ := client.Factory()
 
-	tunnel, _ := client.TunnelFactory(destAddr, serverAddr)
+	tunnel, _ := client.TunnelFactory(name, destAddr, &serverAddr)
 	client.AddTunnel(tunnel)
 
 	client.ConnectAll()
