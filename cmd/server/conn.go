@@ -20,6 +20,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+const sshRequestTypeRemoteAddr = "remote-addr"
+
 // pgrokConnect maps ssh connections to underlying server conn and channel/request channels
 type pgrokConnection struct {
 	cancelF     context.CancelFunc
@@ -325,7 +327,7 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 		}
 	}()
 
-	// sessions have out-of-band requests such as "shell", "pty-req" and "env"
+	// sessions have out-of-band requests
 	go func() {
 		for req := range requests {
 			switch req.Type {
@@ -341,6 +343,10 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 
 				// tell client that pty is ready for input
 				req.Reply(true, nil)
+			case sshRequestTypeRemoteAddr:
+				req.Reply(true, nil)
+				rawmsg := fmt.Sprintf("{\"port\": %s}", *p.port)
+				channel.SendRequest(sshRequestTypeRemoteAddr, true, []byte(rawmsg))
 			case sshRequestTypeWindowChange:
 				// w, h := parseDimensions(req.Payload)
 				// setWinsize(bashf.Fd(), w, h)

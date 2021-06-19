@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,17 +22,20 @@ import (
 const pgrokClientDestinationReachabilityTimeout = 500 * time.Millisecond
 const pgrokClientDestinationReadDeadlineInterval = time.Millisecond * 1000
 const pgrokClientDestinationWriteDeadlineInterval = time.Millisecond * 1000
+const pgrokClientRequestTypeRemoteAddr = "remote-addr"
 const pgrokClientStatusTickerInterval = 25 * time.Millisecond
 const pgrokClientStatusSleepInterval = 50 * time.Millisecond
 const pgrokConnSleepTimeout = time.Millisecond * 250
 const pgrokConnSessionBufferSleepTimeout = time.Millisecond * 250
-const pgrokDefaultServerAddr = "localhost:8022" // TODO-- update to use pgrok.provide.services
+const pgrokDefaultServerHost = "4.tcp.ngrok.io" // TODO-- update to use pgrok.provide.services
+const pgrokDefaultServerPort = 16632
 const pgrokDefaultLocalDesinationAddr = "localhost:4222"
 
 type Tunnel struct {
 	Name       *string
 	Protocol   *string
 	LocalAddr  *string
+	RemoteAddr *string
 	ServerAddr *string
 
 	cancelF     context.CancelFunc
@@ -44,6 +48,7 @@ type Tunnel struct {
 	dest      net.Conn
 	mutex     *sync.Mutex
 	retries   int
+	requests  <-chan *ssh.Request
 	session   *ssh.Session
 	sessionID *string
 
@@ -59,6 +64,10 @@ func (t *Tunnel) main() {
 	t.shutdownCtx, t.cancelF = context.WithCancel(context.Background())
 
 	t.mutex = &sync.Mutex{}
+
+	if t.ServerAddr == nil {
+		t.ServerAddr = common.StringOrNil(fmt.Sprintf("%s:%d", pgrokDefaultServerHost, pgrokDefaultServerPort))
+	}
 
 	var err error
 	t.client, err = ssh.Dial("tcp", *t.ServerAddr, sshClientConfigFactory())
@@ -230,11 +239,37 @@ func (t *Tunnel) initDestinationConn() {
 
 func (t *Tunnel) initChannel() error {
 	var err error
-	t.channel, _, err = t.client.OpenChannel(fmt.Sprintf("session:%s", *t.sessionID), []byte{
+	t.channel, t.requests, err = t.client.OpenChannel(fmt.Sprintf("session:%s", *t.sessionID), []byte{
 		// TODO: JWT
 	})
 	if err != nil {
 		common.Log.Warningf("pgrok tunnel client failed to open channel; %s", err.Error())
+		return err
+	}
+
+	// sessions have out-of-band requests such as "shell", "pty-req" and "env"
+	go func() {
+		for req := range t.requests {
+			switch req.Type {
+			case pgrokClientRequestTypeRemoteAddr:
+				common.Log.Debugf("pgrok tunnel client received response to %s request: %s", pgrokClientRequestTypeRemoteAddr, string(req.Payload))
+				payload := map[string]interface{}{}
+				err := json.Unmarshal(req.Payload, &payload)
+				if err != nil {
+					common.Log.Warningf("pgrok tunnel client failed to parse response to %s request; %s", pgrokClientRequestTypeRemoteAddr, err.Error())
+					req.Reply(false, nil)
+				}
+				if port, portOk := payload["port"].(int64); portOk {
+					t.RemoteAddr = common.StringOrNil(fmt.Sprintf("%s:%d", pgrokDefaultServerHost, port))
+				}
+				req.Reply(true, nil)
+			}
+		}
+	}()
+
+	// send remote address request
+	_, err = t.channel.SendRequest(pgrokClientRequestTypeRemoteAddr, true, nil)
+	if err != nil {
 		return err
 	}
 
@@ -335,24 +370,25 @@ func (t *Tunnel) forward() {
 	// local destination > channel
 	go func() {
 		for !t.shuttingDown() {
-			// dest.SetReadDeadline(time.Now().Add(pgrokClientDestinationReadDeadlineInterval))
-			var n int
-			buffer := make([]byte, 256)
-			if n, err = t.dest.Read(buffer); err != nil && err != io.EOF {
-				common.Log.Warningf("pgrok tunnel client failed to read from local destination (%s); %s", *t.LocalAddr, err.Error())
-				if errors.Is(err, syscall.EPIPE) {
-					redial()
-				}
-			} else if n > 0 {
-				i, err := t.channel.Write(buffer[0:n])
-				_, err = t.stdin.Write(buffer[0:n])
-				if err != nil {
-					common.Log.Warningf("pgrok tunnel client failed to write %d bytes from local destination (%s) to channel; %s", n, *t.LocalAddr, err.Error())
+			if t.dest != nil {
+				var n int
+				buffer := make([]byte, 256)
+				if n, err = t.dest.Read(buffer); err != nil && err != io.EOF {
+					common.Log.Warningf("pgrok tunnel client failed to read from local destination (%s); %s", *t.LocalAddr, err.Error())
 					if errors.Is(err, syscall.EPIPE) {
 						redial()
 					}
-				} else {
-					common.Log.Tracef("pgrok tunnel client wrote %d bytes from local destination (%s) to channel", i, *t.LocalAddr)
+				} else if n > 0 {
+					i, err := t.channel.Write(buffer[0:n])
+					_, err = t.stdin.Write(buffer[0:n])
+					if err != nil {
+						common.Log.Warningf("pgrok tunnel client failed to write %d bytes from local destination (%s) to channel; %s", n, *t.LocalAddr, err.Error())
+						if errors.Is(err, syscall.EPIPE) {
+							redial()
+						}
+					} else {
+						common.Log.Tracef("pgrok tunnel client wrote %d bytes from local destination (%s) to channel", i, *t.LocalAddr)
+					}
 				}
 			}
 
