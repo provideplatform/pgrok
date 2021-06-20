@@ -259,7 +259,7 @@ func (t *Tunnel) initChannel() error {
 					common.Log.Warningf("pgrok tunnel client failed to parse response to %s request; %s", pgrokClientRequestTypeRemoteAddr, err.Error())
 					req.Reply(false, nil)
 				}
-				if addr, addrOk := payload["broadcast_addr"].(string); addrOk {
+				if addr, addrOk := payload["addr"].(string); addrOk {
 					t.RemoteAddr = &addr
 					common.Log.Debugf("pgrok tunnel client resolved address: %s", *t.RemoteAddr)
 				}
