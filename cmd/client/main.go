@@ -24,6 +24,7 @@ const pgrokConnSessionBufferSleepTimeout = time.Millisecond * 250
 const pgrokDefaultServerAddr = "localhost:8022" // TODO-- update to use pgrok.provide.services
 const pgrokDefaultLocalDesinationAddr = "localhost:4222"
 const pgrokDefaultTunnelName = "default-tunnel"
+const pgrokDefaultTunnelProtocol = "tcp"
 
 var (
 	cancelF     context.CancelFunc
@@ -32,6 +33,7 @@ var (
 
 	name       string
 	destAddr   string
+	protocol   string
 	serverAddr string
 )
 
@@ -40,6 +42,12 @@ func init() {
 		name = os.Getenv("PGROK_TUNNEL_NAME")
 	} else {
 		name = pgrokDefaultTunnelName
+	}
+
+	if os.Getenv("PGROK_TUNNEL_PROTOCOL") != "" {
+		protocol = os.Getenv("PGROK_TUNNEL_PROTOCOL")
+	} else {
+		protocol = pgrokDefaultTunnelProtocol
 	}
 
 	if os.Getenv("PGROK_LOCAL_DESTINATION_ADDRESS") != "" {
@@ -58,12 +66,12 @@ func init() {
 func main() {
 	common.Log.Debug("installing signal handlers for pgrok tunnel client")
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	shutdownCtx, cancelF = context.WithCancel(context.Background())
 
 	client, _ := client.Factory()
 
-	tunnel, _ := client.TunnelFactory(name, destAddr, &serverAddr)
+	tunnel, _ := client.TunnelFactory(name, destAddr, &serverAddr, &protocol, nil)
 	client.AddTunnel(tunnel)
 
 	client.ConnectAll()

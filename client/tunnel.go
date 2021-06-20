@@ -31,6 +31,7 @@ const pgrokConnSleepTimeout = time.Millisecond * 100
 const pgrokConnSessionBufferSleepTimeout = time.Millisecond * 100
 const pgrokDefaultServerHost = "3.233.217.16" // "pgrok.provide.services"
 const pgrokDefaultServerPort = 8022
+const pgrokDefaultTunnelProtocol = "tcp"
 
 type Tunnel struct {
 	Name       *string
@@ -45,6 +46,7 @@ type Tunnel struct {
 
 	client    *ssh.Client
 	channel   ssh.Channel
+	jwt       *string
 	mutex     *sync.Mutex
 	requests  <-chan *ssh.Request
 	session   *ssh.Session
@@ -227,21 +229,18 @@ func (t *Tunnel) initSession() {
 	go func() {
 		c := t.client.HandleChannelOpen(pgrokClientChannelTypeForward)
 		for !t.shuttingDown() {
-			select {
-			case newChannel := <-c:
-				if newChannel != nil {
-					fchan, freqs, err := newChannel.Accept()
-					if err != nil {
-						common.Log.Warningf("pgrok tunnel client failed to accept %s channel for %s; %s", pgrokClientChannelTypeForward, *t.LocalAddr, err.Error())
-					} else {
-						go func() {
-							for req := range freqs {
-								req.Reply(true, nil)
-							}
-						}()
+			if newChannel := <-c; newChannel != nil {
+				fchan, freqs, err := newChannel.Accept()
+				if err != nil {
+					common.Log.Warningf("pgrok tunnel client failed to accept %s channel for %s; %s", pgrokClientChannelTypeForward, *t.LocalAddr, err.Error())
+				} else {
+					go func() {
+						for req := range freqs {
+							req.Reply(true, nil)
+						}
+					}()
 
-						go t.forward(fchan)
-					}
+					go t.forward(fchan)
 				}
 			}
 
@@ -251,10 +250,13 @@ func (t *Tunnel) initSession() {
 }
 
 func (t *Tunnel) initChannel() error {
-	var err error
-	t.channel, t.requests, err = t.client.OpenChannel(fmt.Sprintf("session:%s", *t.sessionID), []byte{
-		// TODO: JWT
+	payload, _ := json.Marshal(map[string]interface{}{
+		"authorization": t.jwt,
+		"protocol":      t.Protocol,
 	})
+
+	var err error
+	t.channel, t.requests, err = t.client.OpenChannel(fmt.Sprintf("session:%s", *t.sessionID), payload)
 	if err != nil {
 		common.Log.Warningf("pgrok tunnel client failed to open channel; %s", err.Error())
 		return err
@@ -295,6 +297,8 @@ func (t *Tunnel) forward(channel ssh.Channel) {
 	dest, err := net.Dial("tcp", *t.LocalAddr)
 	if err != nil {
 		common.Log.Warningf("pgrok tunnel client failed to dial local destination address %s; %s", *t.LocalAddr, err.Error())
+		channel.Close()
+		return
 	}
 
 	var once sync.Once
@@ -378,11 +382,6 @@ func (t *Tunnel) forward(channel ssh.Channel) {
 						common.Log.Warningf("pgrok tunnel client failed to write %d bytes from local destination (%s) to channel; %s", n, *t.LocalAddr, err.Error())
 					} else {
 						common.Log.Tracef("pgrok tunnel client wrote %d bytes from local destination (%s) to channel", i, *t.LocalAddr)
-
-						// _, err = t.stdin.Write(buffer[0:n])
-						// if err != nil {
-						// 	common.Log.Warningf("pgrok tunnel client failed to write %d bytes from local destination (%s) to stdin; %s", n, *t.LocalAddr, err.Error())
-						// }
 					}
 				}
 			}

@@ -309,9 +309,22 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 		// c.Reject(ssh.Prohibited, msg)
 	}
 
-	data, err := json.Marshal(c.ExtraData())
+	payload := map[string]interface{}{}
+	data, _ := json.Marshal(c.ExtraData())
+	err := json.Unmarshal(data, &payload)
 	if err == nil {
-		common.Log.Debugf("marshaled %d-byte channel payload", len(data))
+		common.Log.Debugf("parsed %d-byte channel payload", len(data))
+
+		if authorization, authorizationOk := payload["authorization"].(string); authorizationOk {
+			common.Log.Debugf("bearer authorization provided: %s", authorization)
+			common.Log.Warningf("TODO-- verify bearer authorization and atomically consume an available tunnel: %s", authorization)
+		}
+
+		if protocol, protocolOk := payload["protocol"].(string); protocolOk {
+			common.Log.Debugf("channel protocol provided: %s", protocol)
+			p.protocol = &protocol
+		}
+
 	}
 
 	// At this point, we have the opportunity to reject the client's
