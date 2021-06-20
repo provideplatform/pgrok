@@ -229,17 +229,19 @@ func (t *Tunnel) initSession() {
 		for !t.shuttingDown() {
 			select {
 			case newChannel := <-c:
-				fchan, freqs, err := newChannel.Accept()
-				if err != nil {
-					common.Log.Warningf("pgrok tunnel client failed to accept %s channel for %s; %s", pgrokClientChannelTypeForward, *t.LocalAddr, err.Error())
-				} else {
-					go func() {
-						for req := range freqs {
-							req.Reply(true, nil)
-						}
-					}()
+				if newChannel != nil {
+					fchan, freqs, err := newChannel.Accept()
+					if err != nil {
+						common.Log.Warningf("pgrok tunnel client failed to accept %s channel for %s; %s", pgrokClientChannelTypeForward, *t.LocalAddr, err.Error())
+					} else {
+						go func() {
+							for req := range freqs {
+								req.Reply(true, nil)
+							}
+						}()
 
-					go t.forward(fchan)
+						go t.forward(fchan)
+					}
 				}
 			}
 
