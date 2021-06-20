@@ -21,6 +21,7 @@ import (
 )
 
 const sshChannelTypeForward = "forward"
+const sshDefaultTunnelProtocol = "tcp"
 const sshRequestTypeRemoteAddr = "remote-addr"
 
 // pgrokConnect maps ssh connections to underlying server conn and channel/request channels
@@ -40,6 +41,7 @@ type pgrokConnection struct {
 	addr          *string
 	broadcastAddr *string
 	port          *string
+	protocol      *string
 }
 
 func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
@@ -71,6 +73,8 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 		broadcastAddr = *publicIP
 	}
 
+	protocol := sshDefaultTunnelProtocol
+
 	pconn := &pgrokConnection{
 		addr:          &addr,
 		broadcastAddr: &broadcastAddr,
@@ -78,6 +82,7 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 		external:      external,
 		ingressc:      ingressc,
 		port:          &port,
+		protocol:      &protocol,
 		reqc:          reqc,
 	}
 	connections[sessionID] = pconn
@@ -176,11 +181,11 @@ func sshServerConfigFactory(conn net.Conn) *ssh.ServerConfig {
 	for kid := range keypairs {
 		key := keypairs[kid]
 		cfg.AddHostKey(key.SSHSigner())
-		common.Log.Debugf("added ssh host key: %s", key.Fingerprint)
+		common.Log.Tracef("added ssh host key: %s", key.Fingerprint)
 	}
 
 	cfg.AddHostKey(signer)
-	common.Log.Debug("added default ssh host key")
+	common.Log.Tracef("added default ssh host key")
 
 	return cfg
 }
@@ -335,7 +340,8 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 				req.Reply(true, nil)
 			case sshRequestTypeRemoteAddr:
 				req.Reply(true, nil)
-				rawmsg := fmt.Sprintf("{\"addr\": \"%s\"}", fmt.Sprintf("%s:%s", *p.broadcastAddr, *p.port))
+
+				rawmsg := fmt.Sprintf("{\"addr\": \"%s\"}", fmt.Sprintf("%s://%s:%s", *p.protocol, *p.broadcastAddr, *p.port))
 				channel.SendRequest(sshRequestTypeRemoteAddr, true, []byte(rawmsg))
 			case sshRequestTypeWindowChange:
 				// w, h := parseDimensions(req.Payload)
