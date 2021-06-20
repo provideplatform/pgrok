@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/provideplatform/pgrok/common"
+	prvdcommon "github.com/provideservices/provide-go/common"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -37,8 +38,9 @@ type pgrokConnection struct {
 	reqc         <-chan *ssh.Request
 
 	// public, internet-accessible address and port
-	addr *string
-	port *string
+	addr          *string
+	broadcastAddr *string
+	port          *string
 }
 
 func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
@@ -65,13 +67,24 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 	port := addrparts[len(addrparts)-1]
 	common.Log.Debugf("pgrok server bound external listener: %s", addr)
 
+	broadcastAddr := os.Getenv("PGROK_BROADCAST_ADDRESS")
+	if broadcastAddr == "" {
+		publicIP, err := prvdcommon.ResolvePublicIP()
+		if err != nil {
+			common.Log.Warningf("pgrok server failed to resolve public broadcast address; %s", err.Error())
+		} else {
+			broadcastAddr = *publicIP
+		}
+	}
+
 	pconn := &pgrokConnection{
-		addr:     &addr,
-		conn:     sshconn,
-		external: external,
-		ingressc: ingressc,
-		port:     &port,
-		reqc:     reqc,
+		addr:          &addr,
+		broadcastAddr: &broadcastAddr,
+		conn:          sshconn,
+		external:      external,
+		ingressc:      ingressc,
+		port:          &port,
+		reqc:          reqc,
 	}
 	connections[sessionID] = pconn
 	go pconn.repl()
@@ -345,7 +358,7 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 				req.Reply(true, nil)
 			case sshRequestTypeRemoteAddr:
 				req.Reply(true, nil)
-				rawmsg := fmt.Sprintf("{\"port\": %s}", *p.port)
+				rawmsg := fmt.Sprintf("{\"addr\": \"%s\"}", fmt.Sprintf("%s:%s", *p.broadcastAddr, *p.port))
 				channel.SendRequest(sshRequestTypeRemoteAddr, true, []byte(rawmsg))
 			case sshRequestTypeWindowChange:
 				// w, h := parseDimensions(req.Payload)
