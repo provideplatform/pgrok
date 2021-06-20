@@ -220,8 +220,8 @@ func (t *Tunnel) initSession() {
 	}()
 
 	go func() {
+		c := t.client.HandleChannelOpen(pgrokClientChannelTypeForward)
 		for !t.shuttingDown() {
-			c := t.client.HandleChannelOpen(pgrokClientChannelTypeForward)
 			select {
 			case newChannel := <-c:
 				fchan, freqs, err := newChannel.Accept()
