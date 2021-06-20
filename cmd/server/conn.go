@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/provideplatform/pgrok/common"
-	prvdcommon "github.com/provideservices/provide-go/common"
 	"golang.org/x/crypto/ssh"
 )
 
+const sshChannelTypeForward = "forward"
 const sshRequestTypeRemoteAddr = "remote-addr"
 
 // pgrokConnect maps ssh connections to underlying server conn and channel/request channels
@@ -31,11 +31,10 @@ type pgrokConnection struct {
 	shutdownCtx context.Context
 	sigs        chan os.Signal
 
-	conn         *ssh.ServerConn
-	external     net.Listener
-	externalConn net.Conn
-	ingressc     <-chan ssh.NewChannel
-	reqc         <-chan *ssh.Request
+	conn     *ssh.ServerConn
+	external net.Listener
+	ingressc <-chan ssh.NewChannel
+	reqc     <-chan *ssh.Request
 
 	// public, internet-accessible address and port
 	addr          *string
@@ -68,13 +67,8 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 	common.Log.Debugf("pgrok server bound external listener: %s", addr)
 
 	broadcastAddr := os.Getenv("PGROK_BROADCAST_ADDRESS")
-	if broadcastAddr == "" {
-		publicIP, err := prvdcommon.ResolvePublicIP()
-		if err != nil {
-			common.Log.Warningf("pgrok server failed to resolve public broadcast address; %s", err.Error())
-		} else {
-			broadcastAddr = *publicIP
-		}
+	if broadcastAddr == "" && publicIP != nil {
+		broadcastAddr = *publicIP
 	}
 
 	pconn := &pgrokConnection{
@@ -201,6 +195,51 @@ func (p *pgrokConnection) repl() {
 	timer := time.NewTicker(runloopTickInterval)
 	defer timer.Stop()
 
+	go func() {
+		for !p.shuttingDown() {
+			externalConn, err := p.external.Accept()
+			if err != nil {
+				common.Log.Warningf("pgrok server failed to accept connection on external listener; %s", err.Error())
+				break
+			}
+
+			common.Log.Debugf("pgrok server accepted remote connection: %s", externalConn.RemoteAddr())
+
+			fchannel, reqs, err := p.conn.OpenChannel(sshChannelTypeForward, nil)
+			if err != nil {
+				common.Log.Warningf("pgrok server failed to open channel of type: %s; %s", sshChannelTypeForward, err.Error())
+				externalConn.Close()
+				break
+			}
+
+			// sessions have out-of-band requests
+			go func() {
+				for req := range reqs {
+					switch req.Type {
+					case sshRequestTypeShell:
+						// only accept the default shell (i.e. no command in the payload)
+						if len(req.Payload) == 0 {
+							req.Reply(true, nil)
+						}
+					case sshRequestTypePTY:
+						// termLen := req.Payload[3]
+						// w, h := parseDimensions(req.Payload[termLen+4:])
+						// setWinsize(bashf.Fd(), w, h)
+
+						// tell client that pty is ready for input
+						req.Reply(true, nil)
+					case sshRequestTypeWindowChange:
+						// w, h := parseDimensions(req.Payload)
+						// setWinsize(bashf.Fd(), w, h)
+					}
+				}
+			}()
+
+			go p.handleExternal(fchannel, externalConn)
+			time.Sleep(runloopSleepInterval)
+		}
+	}()
+
 	for !p.shuttingDown() {
 		select {
 		case <-timer.C:
@@ -225,7 +264,7 @@ func (p *pgrokConnection) repl() {
 func (p *pgrokConnection) installSignalHandlers() {
 	common.Log.Debug("installing signal handlers for pgrok tunnel connection")
 	p.sigs = make(chan os.Signal, 1)
-	signal.Notify(p.sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	signal.Notify(p.sigs, syscall.SIGINT, syscall.SIGTERM)
 	p.shutdownCtx, p.cancelF = context.WithCancel(context.Background())
 }
 
@@ -278,68 +317,6 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 		return
 	}
 
-	go func() {
-		for !shuttingDown() {
-			externalConn, err := p.external.Accept()
-			if err != nil {
-				common.Log.Warningf("pgrok server failed to accept connection on external listener; %s", err.Error())
-				break
-			}
-
-			close := func() {
-				channel.Close()
-				externalConn.Close()
-			}
-
-			// external > channel
-			var once sync.Once
-			go func() {
-				for !shuttingDown() {
-					var n int
-					buffer := make([]byte, 256)
-					if n, err = externalConn.Read(buffer); err != nil && err != io.EOF {
-						common.Log.Warningf("pgrok server failed to read from external connection; %s", err.Error())
-					} else if n > 0 {
-						common.Log.Tracef("pgrok server read %d bytes from external connection", n)
-						i, err := channel.Write(buffer[0:n])
-						if err != nil {
-							common.Log.Warningf("pgrok server failed to write from external connection to channel; %s", err.Error())
-						} else {
-							common.Log.Tracef("pgrok server wrote %d bytes from external connection to channel", i)
-						}
-					}
-
-					time.Sleep(time.Millisecond * 50)
-				}
-				once.Do(close)
-			}()
-
-			// channel > external
-			go func() {
-				for !shuttingDown() {
-					var n int
-					buffer := make([]byte, 256)
-					if n, err = channel.Read(buffer); err != nil && err != io.EOF {
-						common.Log.Warningf("pgrok server failed to read from channel; %s", err.Error())
-					} else if n > 0 {
-						common.Log.Tracef("pgrok server read %d bytes from channel", n)
-						i, err := externalConn.Write(buffer[0:n])
-						if err != nil {
-							common.Log.Warningf("pgrok server failed to write from channel to external connection; %s", err.Error())
-						} else {
-							common.Log.Tracef("pgrok server wrote %d bytes from channel to external connection", i)
-						}
-					}
-
-					time.Sleep(time.Millisecond * 50)
-				}
-				once.Do(close)
-			}()
-
-			time.Sleep(time.Millisecond * 50)
-		}
-	}()
-
 	// sessions have out-of-band requests
 	go func() {
 		for req := range requests {
@@ -365,6 +342,63 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 				// setWinsize(bashf.Fd(), w, h)
 			}
 		}
+	}()
+}
+
+func (p *pgrokConnection) handleExternal(fchannel ssh.Channel, external net.Conn) {
+	close := func() {
+		fchannel.Close()
+		external.Close()
+		common.Log.Debug("closed channel and external conn")
+	}
+
+	// external > channel
+	var once sync.Once
+	go func() {
+		for !shuttingDown() {
+			buffer := make([]byte, 256)
+			var n int
+			var err error
+			if n, err = external.Read(buffer); err != nil && err != io.EOF {
+				common.Log.Warningf("pgrok server failed to read from external connection; %s", err.Error())
+			} else if n > 0 {
+				common.Log.Tracef("pgrok server read %d bytes from external connection", n)
+				i, err := fchannel.Write(buffer[0:n])
+				if err != nil {
+					common.Log.Warningf("pgrok server failed to write from external connection to channel; %s", err.Error())
+				} else {
+					common.Log.Tracef("pgrok server wrote %d bytes from external connection to channel", i)
+				}
+			}
+
+			time.Sleep(time.Millisecond * 50)
+		}
+
+		once.Do(close)
+	}()
+
+	// channel > external
+	go func() {
+		for !shuttingDown() {
+			buffer := make([]byte, 256)
+			var n int
+			var err error
+			if n, err = fchannel.Read(buffer); err != nil && err != io.EOF {
+				common.Log.Warningf("pgrok server failed to read from channel; %s", err.Error())
+			} else if n > 0 {
+				common.Log.Tracef("pgrok server read %d bytes from channel", n)
+				i, err := external.Write(buffer[0:n])
+				if err != nil {
+					common.Log.Warningf("pgrok server failed to write from channel to external connection; %s", err.Error())
+				} else {
+					common.Log.Tracef("pgrok server wrote %d bytes from channel to external connection", i)
+				}
+			}
+
+			time.Sleep(time.Millisecond * 50)
+		}
+
+		once.Do(close)
 	}()
 }
 

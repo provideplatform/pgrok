@@ -14,6 +14,7 @@ import (
 
 	selfsignedcert "github.com/kthomas/go-self-signed-cert"
 	"github.com/provideplatform/pgrok/common"
+	prvdcommon "github.com/provideservices/provide-go/common"
 	util "github.com/provideservices/provide-go/common/util"
 	"golang.org/x/crypto/ssh"
 )
@@ -38,12 +39,19 @@ var (
 	keypairs    map[string]*util.JWTKeypair
 	listener    net.Listener
 	mutex       *sync.Mutex
+	publicIP    *string
 	signer      ssh.Signer
 )
 
 func init() {
 	keypairs = util.RequireJWTVerifiers()
 	initTLSConfiguration()
+
+	var err error
+	publicIP, err = prvdcommon.ResolvePublicIP()
+	if err != nil {
+		common.Log.Warningf("pgrok server failed to resolve public broadcast address; %s", err.Error())
+	}
 }
 
 func initTLSConfiguration() {
