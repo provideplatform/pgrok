@@ -219,6 +219,11 @@ func (t *Tunnel) initSession() {
 		}
 	}()
 
+	err = t.initChannel()
+	if err != nil {
+		common.Log.Panicf("failed to initialize channel; %s", err.Error())
+	}
+
 	go func() {
 		c := t.client.HandleChannelOpen(pgrokClientChannelTypeForward)
 		for !t.shuttingDown() {
@@ -230,7 +235,7 @@ func (t *Tunnel) initSession() {
 				} else {
 					go func() {
 						for req := range freqs {
-							req.Reply(false, nil)
+							req.Reply(true, nil)
 						}
 					}()
 
@@ -241,11 +246,6 @@ func (t *Tunnel) initSession() {
 			time.Sleep(pgrokConnSessionBufferSleepTimeout)
 		}
 	}()
-
-	err = t.initChannel()
-	if err != nil {
-		common.Log.Panicf("failed to initialize channel; %s", err.Error())
-	}
 }
 
 func (t *Tunnel) initChannel() error {
