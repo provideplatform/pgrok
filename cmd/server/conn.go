@@ -331,6 +331,7 @@ func (p *pgrokConnection) authorizeBearerJWT(bearerToken []byte) error {
 			if err != nil {
 				return err
 			}
+			val = common.StringOrNil(strconv.Itoa(pgrokSubscriptionDefaultCapacity))
 		}
 
 		intval, err := strconv.Atoi(*val)
