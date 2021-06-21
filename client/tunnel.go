@@ -20,6 +20,7 @@ import (
 )
 
 const pgrokClientDestinationReachabilityTimeout = 500 * time.Millisecond
+const pgrokClientBufferSize = 512
 
 // const pgrokClientDestinationReadDeadlineInterval = time.Millisecond * 1000
 // const pgrokClientDestinationWriteDeadlineInterval = time.Millisecond * 1000
@@ -197,7 +198,7 @@ func (t *Tunnel) initSession() {
 	go func() {
 		for !t.shuttingDown() {
 			var n int
-			buffer := make([]byte, 256)
+			buffer := make([]byte, pgrokClientBufferSize)
 			if n, err = t.stdout.Read(buffer); err != nil && err != io.EOF {
 				common.Log.Warningf("pgrok tunnel client failed to consume stdout stream; %s", err.Error())
 			} else if n > 0 {
@@ -211,7 +212,7 @@ func (t *Tunnel) initSession() {
 	go func() {
 		for !t.shuttingDown() {
 			var n int
-			buffer := make([]byte, 256)
+			buffer := make([]byte, pgrokClientBufferSize)
 			if n, err = t.stderr.Read(buffer); err != nil && err != io.EOF {
 				common.Log.Warningf("pgrok tunnel client failed to consume stderr stream; %s", err.Error())
 			} else if n > 0 {
@@ -340,7 +341,7 @@ func (t *Tunnel) forward(channel ssh.Channel) {
 			if dest != nil {
 				var n int
 				var err error
-				buffer := make([]byte, 256)
+				buffer := make([]byte, pgrokClientBufferSize)
 				if n, err = channel.Read(buffer); err != nil && err != io.EOF {
 					common.Log.Warningf("pgrok tunnel client failed to read from channel; %s", err.Error())
 				} else if n > 0 {
@@ -378,7 +379,7 @@ func (t *Tunnel) forward(channel ssh.Channel) {
 			if dest != nil {
 				var n int
 				var err error
-				buffer := make([]byte, 256)
+				buffer := make([]byte, pgrokClientBufferSize)
 				if n, err = dest.Read(buffer); err != nil && err != io.EOF {
 					common.Log.Warningf("pgrok tunnel client failed to read from local destination (%s); %s", *t.LocalAddr, err.Error())
 					if errors.Is(err, syscall.EPIPE) {

@@ -22,6 +22,7 @@ import (
 )
 
 const sshChannelTypeForward = "forward"
+const sshDefaultBufferSize = 512
 const sshDefaultTunnelProtocol = "tcp"
 const sshRequestTypeForwardAddr = "forward-addr"
 
@@ -420,7 +421,7 @@ func (p *pgrokConnection) handleExternal(fchannel ssh.Channel, external net.Conn
 	var once sync.Once
 	go func() {
 		for !p.shuttingDown() {
-			buffer := make([]byte, 256)
+			buffer := make([]byte, sshDefaultBufferSize)
 			var n int
 			var err error
 			if n, err = external.Read(buffer); err != nil && err != io.EOF {
@@ -444,7 +445,7 @@ func (p *pgrokConnection) handleExternal(fchannel ssh.Channel, external net.Conn
 	// channel > external
 	go func() {
 		for !p.shuttingDown() {
-			buffer := make([]byte, 256)
+			buffer := make([]byte, sshDefaultBufferSize)
 			var n int
 			var err error
 			if n, err = fchannel.Read(buffer); err != nil && err != io.EOF {
