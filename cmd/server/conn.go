@@ -23,8 +23,7 @@ import (
 
 const sshChannelTypeForward = "forward"
 const sshDefaultTunnelProtocol = "tcp"
-const sshRequestTypeRemoteAddr = "remote-addr"
-const sshRequestTypeBearerAuth = "bearer-auth"
+const sshRequestTypeForwardAddr = "forward-addr"
 
 // pgrokConnect maps ssh connections to underlying server conn and channel/request channels
 type pgrokConnection struct {
@@ -34,10 +33,11 @@ type pgrokConnection struct {
 	shutdownCtx context.Context
 	sigs        chan os.Signal
 
-	conn     *ssh.ServerConn
-	external net.Listener
-	ingressc <-chan ssh.NewChannel
-	reqc     <-chan *ssh.Request
+	authTimeout time.Duration
+	conn        *ssh.ServerConn
+	external    net.Listener
+	ingressc    <-chan ssh.NewChannel
+	reqc        <-chan *ssh.Request
 
 	// public, internet-accessible address and port
 	addr          *string
@@ -79,6 +79,7 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 
 	pconn := &pgrokConnection{
 		addr:          &addr,
+		authTimeout:   time.Millisecond * 1000,
 		broadcastAddr: &broadcastAddr,
 		conn:          sshconn,
 		external:      external,
@@ -338,6 +339,8 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 		return
 	}
 
+	authorized := false
+
 	parts := strings.Split(channelType, ":")
 	if len(parts) == 2 {
 		channelSessionID := parts[len(parts)-1]
@@ -349,9 +352,7 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 			// c.Reject(ssh.Prohibited, msg)
 		}
 
-		data := c.ExtraData()
-		common.Log.Debugf("%s", string(data))
-		err := p.authorizeBearerJWT(data)
+		err := p.authorizeBearerJWT(c.ExtraData())
 		if err != nil {
 			c.Reject(ssh.Prohibited, fmt.Sprintf("failed to authorize bearer jwt for session id: %s", channelSessionID))
 			p.shutdown()
@@ -387,6 +388,13 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 		return
 	}
 
+	go func() {
+		time.Sleep(p.authTimeout)
+		if !authorized {
+			channel.Close()
+		}
+	}()
+
 	// sessions have out-of-band requests
 	go func() {
 		for req := range requests {
@@ -403,11 +411,11 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 
 				// tell client that pty is ready for input
 				req.Reply(true, nil)
-			case sshRequestTypeRemoteAddr:
+			case sshRequestTypeForwardAddr:
 				req.Reply(true, nil)
 
 				rawmsg := fmt.Sprintf("{\"addr\": \"%s\"}", fmt.Sprintf("%s://%s:%s", *p.protocol, *p.broadcastAddr, *p.port))
-				channel.SendRequest(sshRequestTypeRemoteAddr, true, []byte(rawmsg))
+				channel.SendRequest(sshRequestTypeForwardAddr, true, []byte(rawmsg))
 			case sshRequestTypeWindowChange:
 				// w, h := parseDimensions(req.Payload)
 				// setWinsize(bashf.Fd(), w, h)

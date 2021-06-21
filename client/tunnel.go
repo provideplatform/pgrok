@@ -23,13 +23,13 @@ const pgrokClientDestinationReachabilityTimeout = 500 * time.Millisecond
 
 // const pgrokClientDestinationReadDeadlineInterval = time.Millisecond * 1000
 // const pgrokClientDestinationWriteDeadlineInterval = time.Millisecond * 1000
-const pgrokClientRequestTypeRemoteAddr = "remote-addr"
 const pgrokClientChannelTypeForward = "forward"
+const pgrokClientRequestTypeForwardAddr = "forward-addr"
 const pgrokClientStatusTickerInterval = 25 * time.Millisecond
 const pgrokClientStatusSleepInterval = 50 * time.Millisecond
 const pgrokConnSleepTimeout = time.Millisecond * 100
 const pgrokConnSessionBufferSleepTimeout = time.Millisecond * 100
-const pgrokDefaultServerHost = "3.233.217.16" // "pgrok.provide.services"
+const pgrokDefaultServerHost = "pgrok.provide.services" // "3.233.217.16"
 const pgrokDefaultServerPort = 8022
 const pgrokDefaultTunnelProtocol = "tcp"
 
@@ -250,11 +250,6 @@ func (t *Tunnel) initSession() {
 }
 
 func (t *Tunnel) initChannel() error {
-	// payload, _ := json.Marshal(map[string]interface{}{
-	// 	"authorization": t.jwt,
-	// 	"protocol":      t.Protocol,
-	// })
-
 	payload := make([]byte, 0)
 	if t.jwt != nil {
 		payload = []byte(*t.jwt)
@@ -271,12 +266,12 @@ func (t *Tunnel) initChannel() error {
 	go func() {
 		for req := range t.requests {
 			switch req.Type {
-			case pgrokClientRequestTypeRemoteAddr:
-				common.Log.Debugf("pgrok tunnel client received response to %s request: %s", pgrokClientRequestTypeRemoteAddr, string(req.Payload))
+			case pgrokClientRequestTypeForwardAddr:
+				common.Log.Debugf("pgrok tunnel client received response to %s request: %s", pgrokClientRequestTypeForwardAddr, string(req.Payload))
 				payload := map[string]interface{}{}
 				err := json.Unmarshal(req.Payload, &payload)
 				if err != nil {
-					common.Log.Warningf("pgrok tunnel client failed to parse response to %s request; %s", pgrokClientRequestTypeRemoteAddr, err.Error())
+					common.Log.Warningf("pgrok tunnel client failed to parse response to %s request; %s", pgrokClientRequestTypeForwardAddr, err.Error())
 					req.Reply(false, nil)
 				}
 				if addr, addrOk := payload["addr"].(string); addrOk {
@@ -289,12 +284,12 @@ func (t *Tunnel) initChannel() error {
 	}()
 
 	// send remote address request
-	_, err = t.channel.SendRequest(pgrokClientRequestTypeRemoteAddr, true, nil)
+	_, err = t.channel.SendRequest(pgrokClientRequestTypeForwardAddr, true, nil)
 	if err != nil {
 		return err
 	}
 
-	common.Log.Debugf("pgrok tunnel client opened channel: %v", t.channel)
+	common.Log.Debugf("pgrok tunnel client opened channel; forwarding %s -> %s", *t.RemoteAddr, *t.LocalAddr)
 	return nil
 }
 
