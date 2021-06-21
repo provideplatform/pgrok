@@ -289,7 +289,10 @@ func (t *Tunnel) initChannel() error {
 		return err
 	}
 
-	common.Log.Debugf("pgrok tunnel client opened channel; forwarding %s -> %s", *t.RemoteAddr, *t.LocalAddr)
+	if t.RemoteAddr != nil && t.LocalAddr != nil {
+		common.Log.Debugf("pgrok tunnel client opened channel; forwarding %s -> %s", *t.RemoteAddr, *t.LocalAddr)
+	}
+
 	return nil
 }
 
