@@ -297,8 +297,8 @@ func (t *Tunnel) forward(channel ssh.Channel) {
 	dest, err := net.Dial("tcp", *t.LocalAddr)
 	if err != nil {
 		common.Log.Warningf("pgrok tunnel client failed to dial local destination address %s; %s", *t.LocalAddr, err.Error())
-		channel.Close()
-		return
+		// channel.Close()
+		// return
 	}
 
 	var once sync.Once
