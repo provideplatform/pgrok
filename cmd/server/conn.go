@@ -23,6 +23,7 @@ import (
 const sshChannelTypeForward = "forward"
 const sshDefaultTunnelProtocol = "tcp"
 const sshRequestTypeRemoteAddr = "remote-addr"
+const sshRequestTypeBearerAuth = "bearer-auth"
 
 // pgrokConnect maps ssh connections to underlying server conn and channel/request channels
 type pgrokConnection struct {
@@ -309,8 +310,11 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 		// c.Reject(ssh.Prohibited, msg)
 	}
 
-	payload := map[string]interface{}{}
 	data, _ := json.Marshal(c.ExtraData())
+	common.Log.Debugf("parsed %d-byte channel payload", len(data))
+	common.Log.Tracef("%s", data)
+
+	payload := map[string]interface{}{}
 	err := json.Unmarshal(data, &payload)
 	if err == nil {
 		common.Log.Debugf("parsed %d-byte channel payload", len(data))
