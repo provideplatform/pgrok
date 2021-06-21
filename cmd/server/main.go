@@ -120,7 +120,7 @@ func initListener() {
 func installSignalHandlers() {
 	common.Log.Debug("installing signal handlers for pgrok server")
 	sigs = make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	shutdownCtx, cancelF = context.WithCancel(context.Background())
 }
 
@@ -142,10 +142,6 @@ func tick() error {
 	}
 
 	common.Log.Debugf("pgrok server accepted client connection from %s", conn.RemoteAddr())
-
-	// marshal packet containing JWT
-	// verify JWT
-	//
 
 	_conn, err := sshServerConnFactory(conn)
 	if err != nil {
