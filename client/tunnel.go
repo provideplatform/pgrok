@@ -29,7 +29,7 @@ const pgrokClientStatusTickerInterval = 25 * time.Millisecond
 const pgrokClientStatusSleepInterval = 50 * time.Millisecond
 const pgrokConnSleepTimeout = time.Millisecond * 100
 const pgrokConnSessionBufferSleepTimeout = time.Millisecond * 100
-const pgrokDefaultServerHost = "pgrok.provide.services" // "3.233.217.16"
+const pgrokDefaultServerHost = "3.233.217.16" //"pgrok.provide.services"
 const pgrokDefaultServerPort = 8022
 const pgrokDefaultTunnelProtocol = "tcp"
 
