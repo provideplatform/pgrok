@@ -23,6 +23,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+const pgrokSubscriptionDefaultFreeTierTunnelDuration = time.Minute * 10
 const pgrokSubscriptionDefaultCapacity = 0
 
 const sshChannelTypeForward = "forward"
@@ -292,7 +293,7 @@ func (p *pgrokConnection) shuttingDown() bool {
 	return (atomic.LoadUint32(&p.closing) > 0)
 }
 
-func (p *pgrokConnection) authorizeBearerJWT(bearerToken []byte) error {
+func (p *pgrokConnection) authorizeBearerJWT(bearerToken []byte) (*time.Time, error) {
 	token, err := jwt.Parse(string(bearerToken), func(_jwtToken *jwt.Token) (interface{}, error) {
 		var kid *string
 		if kidhdr, ok := _jwtToken.Header["kid"].(string); ok {
@@ -314,14 +315,18 @@ func (p *pgrokConnection) authorizeBearerJWT(bearerToken []byte) error {
 	})
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	claims := token.Claims.(jwt.MapClaims)
 	sub, subok := claims["sub"].(string)
 	if !subok {
-		return errors.New("failed to parse bearer authorization subject")
+		return nil, errors.New("failed to parse bearer authorization subject")
 	}
+
+	// if non-nil and returned error is nil, tunnel will be closed upon expiration with a message
+	// shown to the user containing instructions on how to increase subscription capacity
+	var tunnelExpiration *time.Time
 
 	tunnelsKey := strings.ReplaceAll(fmt.Sprintf("pgrok.tunnels.subscription.%s", sub), ":", ".")
 	err = redisutil.WithRedlock(tunnelsKey, func() error {
@@ -352,8 +357,9 @@ func (p *pgrokConnection) authorizeBearerJWT(bearerToken []byte) error {
 			capacity = *cap
 			common.Log.Debugf("pgrok tunnels subscription for authorized subject %s consumed available subscription capacity; %d concurrent tunnels remain available", sub, capacity)
 		} else {
-			common.Log.Debugf("pgrok tunnels subscription for authorized subject %s has no available capacity", sub)
-			// TODO: return typed error to indicate the authorization is on the free tier
+			exp := time.Now().Add(pgrokSubscriptionDefaultFreeTierTunnelDuration)
+			common.Log.Debugf("pgrok tunnels subscription for authorized subject %s has no available capacity; free tier tunnel will expire at %s", sub, exp.String())
+			tunnelExpiration = &exp // valid subject authorized but has no available subscription capacity; tunnel will operate on the free tier
 		}
 
 		return nil
@@ -361,11 +367,11 @@ func (p *pgrokConnection) authorizeBearerJWT(bearerToken []byte) error {
 
 	if err != nil {
 		common.Log.Warningf("pgrok tunnels subscription for authorized subject %s failed to consume available subscription capacity; distributed mutex not acquired; %s", sub, err.Error())
-		return err
+		return nil, err
 	}
 
 	common.Log.Debugf("pgrok tunnel connection presented valid bearer authorization credentials; authorized subject: %s", sub)
-	return nil
+	return tunnelExpiration, nil
 }
 
 func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
@@ -396,13 +402,24 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 			// c.Reject(ssh.Prohibited, msg)
 		}
 
-		err := p.authorizeBearerJWT(c.ExtraData())
+		expiration, err := p.authorizeBearerJWT(c.ExtraData())
 		if err != nil {
 			c.Reject(ssh.Prohibited, fmt.Sprintf("failed to authorize bearer jwt for session id: %s", channelSessionID))
 			p.shutdown()
 			return
 		}
-		common.Log.Tracef("authorized bearer jwt for session id: %s", channelSessionID)
+
+		if expiration == nil {
+			common.Log.Tracef("pgrok authorized bearer jwt for session id: %s; subscription capacity reduced while active", channelSessionID)
+		} else {
+			common.Log.Tracef("pgrok authorized bearer jwt for session id: %s; no subscription capacity available; tunnel expires at %s", channelSessionID, expiration.String())
+
+			go func() {
+				time.Sleep(time.Until(*expiration))
+				common.Log.Debugf("pgrok tunnel for free tier session id %s has expired; purchase additional subscription capacity to upgrade", channelSessionID)
+				p.shutdown()
+			}()
+		}
 	}
 
 	// At this point, we have the opportunity to reject the client's
