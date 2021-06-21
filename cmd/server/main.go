@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	redisutil "github.com/kthomas/go-redisutil"
 	selfsignedcert "github.com/kthomas/go-self-signed-cert"
 	"github.com/provideplatform/pgrok/common"
 	prvdcommon "github.com/provideservices/provide-go/common"
@@ -45,6 +46,7 @@ var (
 
 func init() {
 	keypairs = util.RequireJWTVerifiers()
+	redisutil.RequireRedis()
 	initTLSConfiguration()
 
 	var err error

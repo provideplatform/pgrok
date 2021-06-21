@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,10 +17,13 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	redisutil "github.com/kthomas/go-redisutil"
 	"github.com/provideplatform/pgrok/common"
 	util "github.com/provideservices/provide-go/common/util"
 	"golang.org/x/crypto/ssh"
 )
+
+const pgrokSubscriptionDefaultCapacity = 0
 
 const sshChannelTypeForward = "forward"
 const sshDefaultBufferSize = 512
@@ -319,9 +323,47 @@ func (p *pgrokConnection) authorizeBearerJWT(bearerToken []byte) error {
 		return errors.New("failed to parse bearer authorization subject")
 	}
 
-	// FIXME p.subject = &sub
+	tunnelsKey := strings.ReplaceAll(fmt.Sprintf("pgrok.tunnels.subscription.%s", sub), ":", ".")
+	err = redisutil.WithRedlock(tunnelsKey, func() error {
+		val, err := redisutil.Get(tunnelsKey)
+		if err != nil {
+			err = redisutil.Set(tunnelsKey, pgrokSubscriptionDefaultCapacity, nil)
+			if err != nil {
+				return err
+			}
+		}
 
-	common.Log.Debugf("valid bearer authorization; authorized subject: %s", sub)
+		intval, err := strconv.Atoi(*val)
+		if err != nil {
+			return err
+		}
+
+		capacity := int64(intval)
+
+		if capacity > 0 {
+			common.Log.Debugf("pgrok tunnels subscription for authorized subject %s has available capacity: %d", sub, capacity)
+			cap, err := redisutil.Decrement(tunnelsKey)
+			if err != nil {
+				common.Log.Warningf("pgrok tunnels subscription for authorized subject %s failed to consume available subscription capacity", sub)
+				return err
+			}
+
+			capacity = *cap
+			common.Log.Debugf("pgrok tunnels subscription for authorized subject %s consumed available subscription capacity; %d concurrent tunnels remain available", sub, capacity)
+		} else {
+			common.Log.Debugf("pgrok tunnels subscription for authorized subject %s has no available capacity", sub)
+			// TODO: return typed error to indicate the authorization is on the free tier
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		common.Log.Warningf("pgrok tunnels subscription for authorized subject %s failed to consume available subscription capacity; distributed mutex not acquired; %s", sub, err.Error())
+		return err
+	}
+
+	common.Log.Debugf("pgrok tunnel connection presented valid bearer authorization credentials; authorized subject: %s", sub)
 	return nil
 }
 
