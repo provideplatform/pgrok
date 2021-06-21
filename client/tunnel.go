@@ -283,8 +283,13 @@ func (t *Tunnel) initChannel() error {
 		}
 	}()
 
-	// send remote address request
-	_, err = t.channel.SendRequest(pgrokClientRequestTypeForwardAddr, true, nil)
+	// send forwarding request
+	proto := make([]byte, 0)
+	if t.Protocol != nil {
+		proto = []byte(*t.Protocol)
+	}
+
+	_, err = t.channel.SendRequest(pgrokClientRequestTypeForwardAddr, true, proto)
 	if err != nil {
 		return err
 	}

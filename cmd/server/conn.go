@@ -361,25 +361,6 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 		common.Log.Tracef("authorized bearer jwt for session id: %s", channelSessionID)
 	}
 
-	// data, _ := json.Marshal(c.ExtraData())
-	// common.Log.Debugf("parsed %d-byte channel payload", len(data))
-
-	// payload := map[string]interface{}{}
-	// err = json.Unmarshal(data, &payload)
-	// if err == nil {
-	// 	common.Log.Debugf("parsed %d-byte channel payload", len(data))
-
-	// 	if authorization, authorizationOk := payload["authorization"].(string); authorizationOk {
-	// 		common.Log.Debugf("bearer authorization provided: %s", authorization)
-	// 		common.Log.Warningf("TODO-- verify bearer authorization and atomically consume an available tunnel: %s", authorization)
-	// 	}
-
-	// 	if protocol, protocolOk := payload["protocol"].(string); protocolOk {
-	// 		common.Log.Debugf("channel protocol provided: %s", protocol)
-	// 		p.protocol = &protocol
-	// 	}
-	// }
-
 	// At this point, we have the opportunity to reject the client's
 	// request for another logical connection
 	channel, requests, err := c.Accept()
@@ -413,6 +394,10 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 				req.Reply(true, nil)
 			case sshRequestTypeForwardAddr:
 				req.Reply(true, nil)
+
+				if req.Payload != nil && len(req.Payload) > 0 {
+					p.protocol = common.StringOrNil(string(req.Payload))
+				}
 
 				rawmsg := fmt.Sprintf("{\"addr\": \"%s\"}", fmt.Sprintf("%s://%s:%s", *p.protocol, *p.broadcastAddr, *p.port))
 				channel.SendRequest(sshRequestTypeForwardAddr, true, []byte(rawmsg))
