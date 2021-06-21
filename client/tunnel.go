@@ -250,10 +250,15 @@ func (t *Tunnel) initSession() {
 }
 
 func (t *Tunnel) initChannel() error {
-	payload, _ := json.Marshal(map[string]interface{}{
-		"authorization": t.jwt,
-		"protocol":      t.Protocol,
-	})
+	// payload, _ := json.Marshal(map[string]interface{}{
+	// 	"authorization": t.jwt,
+	// 	"protocol":      t.Protocol,
+	// })
+
+	payload := make([]byte, 0)
+	if t.jwt != nil {
+		payload = []byte(*t.jwt)
+	}
 
 	var err error
 	t.channel, t.requests, err = t.client.OpenChannel(fmt.Sprintf("session:%s", *t.sessionID), payload)

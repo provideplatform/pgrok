@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +15,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/provideplatform/pgrok/common"
+	util "github.com/provideservices/provide-go/common/util"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -285,6 +286,43 @@ func (p *pgrokConnection) shuttingDown() bool {
 	return (atomic.LoadUint32(&p.closing) > 0)
 }
 
+func (p *pgrokConnection) authorizeBearerJWT(bearerToken []byte) error {
+	token, err := jwt.Parse(string(bearerToken), func(_jwtToken *jwt.Token) (interface{}, error) {
+		var kid *string
+		if kidhdr, ok := _jwtToken.Header["kid"].(string); ok {
+			kid = &kidhdr
+		}
+
+		publicKey, _, _, _ := util.ResolveJWTKeypair(kid)
+		if publicKey == nil {
+			msg := "failed to resolve a valid JWT verification key"
+			if kid != nil {
+				msg = fmt.Sprintf("%s; invalid kid specified in header: %s", msg, *kid)
+			} else {
+				msg = fmt.Sprintf("%s; no default verification key configured", msg)
+			}
+			return nil, fmt.Errorf(msg)
+		}
+
+		return publicKey, nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	claims := token.Claims.(jwt.MapClaims)
+	sub, subok := claims["sub"].(string)
+	if !subok {
+		return errors.New("failed to parse bearer authorization subject")
+	}
+
+	// FIXME p.subject = &sub
+
+	common.Log.Debugf("valid bearer authorization; authorized subject: %s", sub)
+	return nil
+}
+
 func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 	if c == nil {
 		// c.Reject(ssh.UnknownChannelType, "nil channel")
@@ -301,35 +339,45 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 	}
 
 	parts := strings.Split(channelType, ":")
-	channelSessionID := parts[len(parts)-1]
-	_, pgconnExists := connections[channelSessionID]
+	if len(parts) == 2 {
+		channelSessionID := parts[len(parts)-1]
+		_, pgconnExists := connections[channelSessionID]
 
-	if pgconnExists {
-		msg := fmt.Sprintf("resolved existing pgrok ssh connection for session id: %s", channelSessionID)
-		common.Log.Trace(msg)
-		// c.Reject(ssh.Prohibited, msg)
-	}
-
-	data, _ := json.Marshal(c.ExtraData())
-	common.Log.Debugf("parsed %d-byte channel payload", len(data))
-	common.Log.Tracef("%s", data)
-
-	payload := map[string]interface{}{}
-	err := json.Unmarshal(data, &payload)
-	if err == nil {
-		common.Log.Debugf("parsed %d-byte channel payload", len(data))
-
-		if authorization, authorizationOk := payload["authorization"].(string); authorizationOk {
-			common.Log.Debugf("bearer authorization provided: %s", authorization)
-			common.Log.Warningf("TODO-- verify bearer authorization and atomically consume an available tunnel: %s", authorization)
+		if pgconnExists {
+			msg := fmt.Sprintf("resolved existing pgrok ssh connection for session id: %s", channelSessionID)
+			common.Log.Trace(msg)
+			// c.Reject(ssh.Prohibited, msg)
 		}
 
-		if protocol, protocolOk := payload["protocol"].(string); protocolOk {
-			common.Log.Debugf("channel protocol provided: %s", protocol)
-			p.protocol = &protocol
+		data := c.ExtraData()
+		common.Log.Debugf("%s", string(data))
+		err := p.authorizeBearerJWT(data)
+		if err != nil {
+			c.Reject(ssh.Prohibited, fmt.Sprintf("failed to authorize bearer jwt for session id: %s", channelSessionID))
+			p.shutdown()
+			return
 		}
-
+		common.Log.Tracef("authorized bearer jwt for session id: %s", channelSessionID)
 	}
+
+	// data, _ := json.Marshal(c.ExtraData())
+	// common.Log.Debugf("parsed %d-byte channel payload", len(data))
+
+	// payload := map[string]interface{}{}
+	// err = json.Unmarshal(data, &payload)
+	// if err == nil {
+	// 	common.Log.Debugf("parsed %d-byte channel payload", len(data))
+
+	// 	if authorization, authorizationOk := payload["authorization"].(string); authorizationOk {
+	// 		common.Log.Debugf("bearer authorization provided: %s", authorization)
+	// 		common.Log.Warningf("TODO-- verify bearer authorization and atomically consume an available tunnel: %s", authorization)
+	// 	}
+
+	// 	if protocol, protocolOk := payload["protocol"].(string); protocolOk {
+	// 		common.Log.Debugf("channel protocol provided: %s", protocol)
+	// 		p.protocol = &protocol
+	// 	}
+	// }
 
 	// At this point, we have the opportunity to reject the client's
 	// request for another logical connection
@@ -378,7 +426,7 @@ func (p *pgrokConnection) handleExternal(fchannel ssh.Channel, external net.Conn
 	// external > channel
 	var once sync.Once
 	go func() {
-		for !shuttingDown() {
+		for !p.shuttingDown() {
 			buffer := make([]byte, 256)
 			var n int
 			var err error
@@ -402,7 +450,7 @@ func (p *pgrokConnection) handleExternal(fchannel ssh.Channel, external net.Conn
 
 	// channel > external
 	go func() {
-		for !shuttingDown() {
+		for !p.shuttingDown() {
 			buffer := make([]byte, 256)
 			var n int
 			var err error
