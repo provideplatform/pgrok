@@ -56,6 +56,17 @@ func (c *Client) Close() {
 	}
 }
 
+// Closed returns true if all client tunnels have been disconnected
+func (c *Client) Closed() bool {
+	for _, t := range c.Tunnels {
+		if !t.shuttingDown() {
+			return false
+		}
+	}
+
+	return true
+}
+
 // ConnectAll connects all tunnels
 func (c *Client) ConnectAll() error {
 	for _, t := range c.Tunnels {

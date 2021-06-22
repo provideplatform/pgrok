@@ -84,7 +84,9 @@ func main() {
 	for !shuttingDown() {
 		select {
 		case <-timer.C:
-			// no-op
+			if client.Closed() {
+				shutdown()
+			}
 		case sig := <-sigs:
 			common.Log.Infof("received signal: %s", sig)
 			client.Close()
