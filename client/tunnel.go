@@ -26,6 +26,7 @@ const pgrokClientBufferSize = 512
 // const pgrokClientDestinationWriteDeadlineInterval = time.Millisecond * 1000
 const pgrokClientChannelTypeForward = "forward"
 const pgrokClientRequestTypeForwardAddr = "forward-addr"
+const pgrokClientRequestTypeTunnelExpiration = "tunnel-expiration"
 const pgrokClientStatusTickerInterval = 25 * time.Millisecond
 const pgrokClientStatusSleepInterval = 50 * time.Millisecond
 const pgrokConnSleepTimeout = time.Millisecond * 100
@@ -99,7 +100,6 @@ func (t *Tunnel) main() {
 	}
 
 	common.Log.Debug("exiting pgrok tunnel client")
-	t.cancelF()
 }
 
 func sshClientConfigFactory() *ssh.ClientConfig {
@@ -267,6 +267,11 @@ func (t *Tunnel) initChannel() error {
 	go func() {
 		for req := range t.requests {
 			switch req.Type {
+			case pgrokClientRequestTypeTunnelExpiration:
+				req.Reply(true, nil)
+				common.Log.Info("pgrok tunnel client expired;\n\n\tPurchase additional subscription capacity 🥳 🎉")
+				t.shutdown()
+				break
 			case pgrokClientRequestTypeForwardAddr:
 				common.Log.Debugf("pgrok tunnel client received response to %s request: %s", pgrokClientRequestTypeForwardAddr, string(req.Payload))
 				payload := map[string]interface{}{}

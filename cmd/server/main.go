@@ -91,7 +91,6 @@ func main() {
 			go tick()
 		case sig := <-sigs:
 			common.Log.Debugf("received signal: %s", sig)
-			listener.Close()
 			shutdown()
 		case <-shutdownCtx.Done():
 			close(sigs)
@@ -129,6 +128,7 @@ func installSignalHandlers() {
 func shutdown() {
 	if atomic.AddUint32(&closing, 1) == 1 {
 		common.Log.Debug("shutting down pgrok server")
+		listener.Close()
 		cancelF()
 	}
 }

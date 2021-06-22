@@ -77,7 +77,7 @@ func main() {
 
 	client.ConnectAll()
 
-	common.Log.Debugf("running pgrok tunnel client")
+	common.Log.Debugf("running pgrok tunnel client main()")
 	timer := time.NewTicker(pgrokClientStatusTickerInterval)
 	defer timer.Stop()
 
@@ -87,6 +87,7 @@ func main() {
 			// no-op
 		case sig := <-sigs:
 			common.Log.Infof("received signal: %s", sig)
+			client.Close()
 			shutdown()
 		case <-shutdownCtx.Done():
 			close(sigs)
@@ -96,13 +97,12 @@ func main() {
 		}
 	}
 
-	common.Log.Debug("exiting pgrok tunnel client")
-	cancelF()
+	common.Log.Debug("exiting pgrok tunnel client main()")
 }
 
 func shutdown() {
 	if atomic.AddUint32(&closing, 1) == 1 {
-		common.Log.Debug("shutting down pgrok tunnel client")
+		common.Log.Debug("shutting down pgrok tunnel client main()")
 		cancelF()
 	}
 }

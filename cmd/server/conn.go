@@ -2,36 +2,32 @@ package main
 
 import (
 	"context"
-	"encoding/hex"
-	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
-	redisutil "github.com/kthomas/go-redisutil"
 	"github.com/provideplatform/pgrok/common"
-	util "github.com/provideservices/provide-go/common/util"
 	"golang.org/x/crypto/ssh"
 )
 
-const pgrokSubscriptionDefaultFreeTierTunnelDuration = time.Minute * 10
+const pgrokSubscriptionDefaultFreeTierTunnelDuration = time.Second * 10
 const pgrokSubscriptionDefaultCapacity = 0
 
 const sshChannelTypeForward = "forward"
 const sshDefaultBufferSize = 512
 const sshDefaultTunnelProtocol = "tcp"
 const sshRequestTypeForwardAddr = "forward-addr"
+const sshRequestTypeTunnelExpiration = "tunnel-expiration"
 
-// pgrokConnect maps ssh connections to underlying server conn and channel/request channels
+// pgrokConnection maps an ssh connection to an underlying tunnel and channels; such channel I/O
+// is multiplexed over the tunnel, with each channel serving as a pipe between an ephemeral
+// external connection and the local address and port being forwarded
 type pgrokConnection struct {
 	cancelF     context.CancelFunc
 	closing     uint32
@@ -45,158 +41,11 @@ type pgrokConnection struct {
 	ingressc    <-chan ssh.NewChannel
 	reqc        <-chan *ssh.Request
 
-	// public, internet-accessible address and port
+	// forwarded address, port. protocol and broadcast address
 	addr          *string
 	broadcastAddr *string
 	port          *string
 	protocol      *string
-}
-
-func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
-	var err error
-	sshconn, ingressc, reqc, err := ssh.NewServerConn(conn, sshServerConfigFactory(conn))
-	if err != nil {
-		common.Log.Warningf("failed to initialize pgrok ssh server connection; failed to complete handshake; %s", err.Error())
-		return nil, err
-	}
-
-	sessionID := hex.EncodeToString(sshconn.SessionID())
-
-	// TODO-- buffer this...
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	external, err := net.Listen("tcp", ":0")
-	if err != nil {
-		common.Log.Warningf("pgrok server failed to bind external listener on next ephemeral port; %s", err.Error())
-	}
-
-	addr := external.Addr().String()
-	addrparts := strings.Split(addr, ":")
-	port := addrparts[len(addrparts)-1]
-	common.Log.Debugf("pgrok server bound external listener: %s", addr)
-
-	broadcastAddr := os.Getenv("PGROK_BROADCAST_ADDRESS")
-	if broadcastAddr == "" && publicIP != nil {
-		broadcastAddr = *publicIP
-	}
-
-	protocol := sshDefaultTunnelProtocol
-
-	pconn := &pgrokConnection{
-		addr:          &addr,
-		authTimeout:   time.Millisecond * 1000,
-		broadcastAddr: &broadcastAddr,
-		conn:          sshconn,
-		external:      external,
-		ingressc:      ingressc,
-		port:          &port,
-		protocol:      &protocol,
-		reqc:          reqc,
-	}
-	connections[sessionID] = pconn
-	go pconn.repl()
-
-	return sshconn, nil
-}
-
-func sshServerConfigFactory(conn net.Conn) *ssh.ServerConfig {
-	cfg := &ssh.ServerConfig{
-
-		// Rand provides the source of entropy for cryptographic
-		// primitives. If Rand is nil, the cryptographic random reader
-		// in package crypto/rand will be used.
-		// Rand io.Reader
-
-		// The maximum number of bytes sent or received after which a
-		// new key is negotiated. It must be at least 256. If
-		// unspecified, a size suitable for the chosen cipher is used.
-		// RekeyThreshold uint64
-
-		// The allowed key exchanges algorithms. If unspecified then a
-		// default set of algorithms is used.
-		// KeyExchanges []string
-
-		// The allowed cipher algorithms. If unspecified then a sensible
-		// default is used.
-		// Ciphers []string
-
-		// The allowed MAC algorithms. If unspecified then a sensible default
-		// is used.
-		// MACs []string
-
-		// NoClientAuth is true if clients are allowed to connect without
-		// authenticating.
-		NoClientAuth: true,
-
-		// MaxAuthTries specifies the maximum number of authentication attempts
-		// permitted per connection. If set to a negative number, the number of
-		// attempts are unlimited. If set to zero, the number of attempts are limited
-		// to 6.
-		MaxAuthTries: sshMaxAuthTries,
-
-		// PasswordCallback, if non-nil, is called when a user
-		// attempts to authenticate using a password.
-		PasswordCallback: func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
-			return nil, errors.New("password authentication not supported")
-		},
-
-		// PublicKeyCallback, if non-nil, is called when a client
-		// offers a public key for authentication. It must return a nil error
-		// if the given public key can be used to authenticate the
-		// given user. For example, see CertChecker.Authenticate. A
-		// call to this function does not guarantee that the key
-		// offered is in fact used to authenticate. To record any data
-		// depending on the public key, store it inside a
-		// Permissions.Extensions entry.
-		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			permissions := &ssh.Permissions{}
-			// common.Log.Warning("public key callback currently unimplemented")
-			return permissions, nil
-		},
-
-		// KeyboardInteractiveCallback, if non-nil, is called when
-		// keyboard-interactive authentication is selected (RFC
-		// 4256). The client object's Challenge function should be
-		// used to query the user. The callback may offer multiple
-		// Challenge rounds. To avoid information leaks, the client
-		// should be presented a challenge even if the user is
-		// unknown.
-		// KeyboardInteractiveCallback func(conn ConnMetadata, client KeyboardInteractiveChallenge) (*Permissions, error)
-
-		// AuthLogCallback, if non-nil, is called to log all authentication
-		// attempts.
-		AuthLogCallback: func(conn ssh.ConnMetadata, method string, err error) {
-			common.Log.Debugf("attempting connection attempt; method: %s", method)
-		},
-
-		// ServerVersion is the version identification string to announce in
-		// the public handshake.
-		// If empty, a reasonable default is used.
-		// Note that RFC 4253 section 4.2 requires that this string start with
-		// "SSH-2.0-".
-		ServerVersion: "SSH-2.0-pgrok",
-
-		// BannerCallback, if present, is called and the return string is sent to
-		// the client after key exchange completed but before authentication.
-		// BannerCallback func(conn ConnMetadata) string
-
-		// GSSAPIWithMICConfig includes gssapi server and callback, which if both non-nil, is used
-		// when gssapi-with-mic authentication is selected (RFC 4462 section 3).
-		// GSSAPIWithMICConfig *GSSAPIWithMICConfig
-		// contains filtered or unexported fields
-	}
-
-	for kid := range keypairs {
-		key := keypairs[kid]
-		cfg.AddHostKey(key.SSHSigner())
-		common.Log.Tracef("added ssh host key: %s", key.Fingerprint)
-	}
-
-	cfg.AddHostKey(signer)
-	common.Log.Tracef("added default ssh host key")
-
-	return cfg
 }
 
 func (p *pgrokConnection) repl() {
@@ -209,60 +58,14 @@ func (p *pgrokConnection) repl() {
 	timer := time.NewTicker(runloopTickInterval)
 	defer timer.Stop()
 
-	go func() {
-		for !p.shuttingDown() {
-			externalConn, err := p.external.Accept()
-			if err != nil {
-				common.Log.Warningf("pgrok server failed to accept connection on external listener; %s", err.Error())
-				break
-			}
-
-			common.Log.Debugf("pgrok server accepted remote connection: %s", externalConn.RemoteAddr())
-
-			fchannel, reqs, err := p.conn.OpenChannel(sshChannelTypeForward, nil)
-			if err != nil {
-				common.Log.Warningf("pgrok server failed to open channel of type: %s; %s", sshChannelTypeForward, err.Error())
-				externalConn.Close()
-				break
-			}
-
-			// sessions have out-of-band requests
-			go func() {
-				for req := range reqs {
-					switch req.Type {
-					case sshRequestTypeShell:
-						// only accept the default shell (i.e. no command in the payload)
-						if len(req.Payload) == 0 {
-							req.Reply(true, nil)
-						}
-					case sshRequestTypePTY:
-						// termLen := req.Payload[3]
-						// w, h := parseDimensions(req.Payload[termLen+4:])
-						// setWinsize(bashf.Fd(), w, h)
-
-						// tell client that pty is ready for input
-						req.Reply(true, nil)
-					case sshRequestTypeWindowChange:
-						// w, h := parseDimensions(req.Payload)
-						// setWinsize(bashf.Fd(), w, h)
-					}
-				}
-			}()
-
-			go p.handleExternal(fchannel, externalConn)
-			time.Sleep(runloopSleepInterval)
-		}
-	}()
-
 	for !p.shuttingDown() {
 		select {
 		case <-timer.C:
-			// no-op
+			go p.tick()
 		case channel := <-p.ingressc:
-			go p.handleChannel(channel)
+			go p.handleChannelOpen(channel)
 		case sig := <-p.sigs:
 			common.Log.Debugf("pgrok connection repl received signal: %s", sig)
-			listener.Close()
 			p.shutdown()
 		case <-p.shutdownCtx.Done():
 			close(p.sigs)
@@ -272,7 +75,6 @@ func (p *pgrokConnection) repl() {
 	}
 
 	common.Log.Debug("exiting pgrok connection repl")
-	p.cancelF()
 }
 
 func (p *pgrokConnection) installSignalHandlers() {
@@ -285,6 +87,8 @@ func (p *pgrokConnection) installSignalHandlers() {
 func (p *pgrokConnection) shutdown() {
 	if atomic.AddUint32(&p.closing, 1) == 1 {
 		common.Log.Debug("shutting down pgrok tunnel connection")
+		p.conn.Close()
+		p.external.Close()
 		p.cancelF()
 	}
 }
@@ -293,92 +97,44 @@ func (p *pgrokConnection) shuttingDown() bool {
 	return (atomic.LoadUint32(&p.closing) > 0)
 }
 
-func (p *pgrokConnection) authorizeBearerJWT(bearerToken []byte) (*time.Time, error) {
-	token, err := jwt.Parse(string(bearerToken), func(_jwtToken *jwt.Token) (interface{}, error) {
-		var kid *string
-		if kidhdr, ok := _jwtToken.Header["kid"].(string); ok {
-			kid = &kidhdr
-		}
-
-		publicKey, _, _, _ := util.ResolveJWTKeypair(kid)
-		if publicKey == nil {
-			msg := "failed to resolve a valid JWT verification key"
-			if kid != nil {
-				msg = fmt.Sprintf("%s; invalid kid specified in header: %s", msg, *kid)
-			} else {
-				msg = fmt.Sprintf("%s; no default verification key configured", msg)
-			}
-			return nil, fmt.Errorf(msg)
-		}
-
-		return publicKey, nil
-	})
-
+func (p *pgrokConnection) tick() error {
+	externalConn, err := p.external.Accept()
 	if err != nil {
-		return nil, err
+		if !p.shuttingDown() {
+			common.Log.Warningf("pgrok server failed to accept connection on external listener; %s", err.Error())
+		}
+		return err
 	}
 
-	claims := token.Claims.(jwt.MapClaims)
-	sub, subok := claims["sub"].(string)
-	if !subok {
-		return nil, errors.New("failed to parse bearer authorization subject")
-	}
+	common.Log.Debugf("pgrok server accepted remote connection: %s", externalConn.RemoteAddr())
 
-	// if non-nil and returned error is nil, tunnel will be closed upon expiration with a message
-	// shown to the user containing instructions on how to increase subscription capacity
-	var tunnelExpiration *time.Time
-
-	tunnelsKey := strings.ReplaceAll(fmt.Sprintf("pgrok.tunnels.subscription.%s", sub), ":", ".")
-	err = redisutil.WithRedlock(tunnelsKey, func() error {
-		val, err := redisutil.Get(tunnelsKey)
-		if err != nil {
-			err = redisutil.Set(tunnelsKey, pgrokSubscriptionDefaultCapacity, nil)
-			if err != nil {
-				return err
-			}
-			val = common.StringOrNil(strconv.Itoa(pgrokSubscriptionDefaultCapacity))
-		}
-
-		intval, err := strconv.Atoi(*val)
-		if err != nil {
-			return err
-		}
-
-		capacity := int64(intval)
-
-		if capacity > 0 {
-			common.Log.Debugf("pgrok tunnels subscription for authorized subject %s has available capacity: %d", sub, capacity)
-			cap, err := redisutil.Decrement(tunnelsKey)
-			if err != nil {
-				common.Log.Warningf("pgrok tunnels subscription for authorized subject %s failed to consume available subscription capacity", sub)
-				return err
-			}
-
-			capacity = *cap
-			common.Log.Debugf("pgrok tunnels subscription for authorized subject %s consumed available subscription capacity; %d concurrent tunnels remain available", sub, capacity)
-		} else {
-			exp := time.Now().Add(pgrokSubscriptionDefaultFreeTierTunnelDuration)
-			common.Log.Debugf("pgrok tunnels subscription for authorized subject %s has no available capacity; free tier tunnel will expire at %s", sub, exp.String())
-			tunnelExpiration = &exp // valid subject authorized but has no available subscription capacity; tunnel will operate on the free tier
-		}
-
-		return nil
-	})
-
+	fchannel, reqc, err := p.conn.OpenChannel(sshChannelTypeForward, nil)
 	if err != nil {
-		common.Log.Warningf("pgrok tunnels subscription for authorized subject %s failed to consume available subscription capacity; distributed mutex not acquired; %s", sub, err.Error())
-		return nil, err
+		common.Log.Warningf("pgrok server failed to open channel of type: %s; %s", sshChannelTypeForward, err.Error())
+		externalConn.Close()
+		return err
 	}
 
-	common.Log.Debugf("pgrok tunnel connection presented valid bearer authorization credentials; authorized subject: %s", sub)
-	return tunnelExpiration, nil
+	pipe := &pgrokTunnelPipe{
+		authTimeout: p.authTimeout,
+		external:    externalConn,
+		fchannel:    fchannel,
+		reqc:        reqc,
+		// subject:
+	}
+
+	go pipe.repl()
+	return nil
 }
 
-func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
+func (p *pgrokConnection) handleChannelOpen(c ssh.NewChannel) {
 	if c == nil {
-		// c.Reject(ssh.UnknownChannelType, "nil channel")
 		return
 	}
+
+	var err error
+	var channel ssh.Channel
+	var requests <-chan *ssh.Request
 
 	channelType := c.ChannelType()
 
@@ -399,15 +155,16 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 		if pgconnExists {
 			msg := fmt.Sprintf("resolved existing pgrok ssh connection for session id: %s", channelSessionID)
 			common.Log.Trace(msg)
-			// c.Reject(ssh.Prohibited, msg)
 		}
 
-		expiration, err := p.authorizeBearerJWT(c.ExtraData())
+		expiration, err := authorizeBearerJWT(c.ExtraData())
 		if err != nil {
 			c.Reject(ssh.Prohibited, fmt.Sprintf("failed to authorize bearer jwt for session id: %s", channelSessionID))
 			p.shutdown()
 			return
 		}
+
+		authorized = true
 
 		if expiration == nil {
 			common.Log.Tracef("pgrok authorized bearer jwt for session id: %s; subscription capacity reduced while active", channelSessionID)
@@ -416,15 +173,19 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 
 			go func() {
 				time.Sleep(time.Until(*expiration))
-				common.Log.Debugf("pgrok tunnel for free tier session id %s has expired; purchase additional subscription capacity to upgrade", channelSessionID)
-				p.shutdown()
+				common.Log.Debugf("pgrok ssh tunnel for free tier session id %s has expired", channelSessionID)
+				if channel != nil {
+					channel.SendRequest(sshRequestTypeTunnelExpiration, true, nil)
+					channel.Close()
+					p.shutdown()
+				}
 			}()
 		}
 	}
 
-	// At this point, we have the opportunity to reject the client's
-	// request for another logical connection
-	channel, requests, err := c.Accept()
+	// At this point, we have the opportunity to reject
+	// the client request for another logical connection
+	channel, requests, err = c.Accept()
 	if err != nil {
 		common.Log.Warningf("failed to access pgrok ssh connection; could not accept channel; %s", err)
 		return
@@ -469,83 +230,3 @@ func (p *pgrokConnection) handleChannel(c ssh.NewChannel) {
 		}
 	}()
 }
-
-func (p *pgrokConnection) handleExternal(fchannel ssh.Channel, external net.Conn) {
-	close := func() {
-		fchannel.Close()
-		external.Close()
-		common.Log.Debug("closed channel and external conn")
-	}
-
-	// external > channel
-	var once sync.Once
-	go func() {
-		for !p.shuttingDown() {
-			buffer := make([]byte, sshDefaultBufferSize)
-			var n int
-			var err error
-			if n, err = external.Read(buffer); err != nil && err != io.EOF {
-				common.Log.Warningf("pgrok server failed to read from external connection; %s", err.Error())
-			} else if n > 0 {
-				common.Log.Tracef("pgrok server read %d bytes from external connection", n)
-				i, err := fchannel.Write(buffer[0:n])
-				if err != nil {
-					common.Log.Warningf("pgrok server failed to write from external connection to channel; %s", err.Error())
-				} else {
-					common.Log.Tracef("pgrok server wrote %d bytes from external connection to channel", i)
-				}
-			}
-
-			time.Sleep(time.Millisecond * 50)
-		}
-
-		once.Do(close)
-	}()
-
-	// channel > external
-	go func() {
-		for !p.shuttingDown() {
-			buffer := make([]byte, sshDefaultBufferSize)
-			var n int
-			var err error
-			if n, err = fchannel.Read(buffer); err != nil && err != io.EOF {
-				common.Log.Warningf("pgrok server failed to read from channel; %s", err.Error())
-			} else if n > 0 {
-				common.Log.Tracef("pgrok server read %d bytes from channel", n)
-				i, err := external.Write(buffer[0:n])
-				if err != nil {
-					common.Log.Warningf("pgrok server failed to write from channel to external connection; %s", err.Error())
-				} else {
-					common.Log.Tracef("pgrok server wrote %d bytes from channel to external connection", i)
-				}
-			}
-
-			time.Sleep(time.Millisecond * 50)
-		}
-
-		once.Do(close)
-	}()
-}
-
-// parseDimensions extracts terminal dimensions (width x height) from the provided buffer.
-// func parseDimensions(b []byte) (uint32, uint32) {
-// 	w := binary.BigEndian.Uint32(b)
-// 	h := binary.BigEndian.Uint32(b[4:])
-// 	return w, h
-// }
-
-// ======================
-
-// winsize stores the height and width of a terminal.
-// type winsize struct {
-// 	Height uint16
-// 	Width  uint16
-// 	x      uint16 // unused
-// 	y      uint16 // unused
-// }
-
-// setWinsize sets the size of the given pty.
-// func setWinsize(fd uintptr, w, h uint32) {
-// 	ws := &winsize{Width: uint16(w), Height: uint16(h)}
-// 	syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(syscall.TIOCSWINSZ), uintptr(unsafe.Pointer(ws)))
-// }
