@@ -15,8 +15,8 @@ import (
 	redisutil "github.com/kthomas/go-redisutil"
 	selfsignedcert "github.com/kthomas/go-self-signed-cert"
 	"github.com/provideplatform/pgrok/common"
-	prvdcommon "github.com/provideservices/provide-go/common"
-	util "github.com/provideservices/provide-go/common/util"
+	prvdcommon "github.com/provideplatform/provide-go/common"
+	util "github.com/provideplatform/provide-go/common/util"
 	"golang.org/x/crypto/ssh"
 )
 

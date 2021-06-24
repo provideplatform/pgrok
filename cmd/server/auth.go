@@ -10,7 +10,7 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	redisutil "github.com/kthomas/go-redisutil"
 	"github.com/provideplatform/pgrok/common"
-	util "github.com/provideservices/provide-go/common/util"
+	util "github.com/provideplatform/provide-go/common/util"
 )
 
 func authorizeBearerJWT(bearerToken []byte) (*time.Time, error) {
