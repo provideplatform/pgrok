@@ -85,10 +85,12 @@ func main() {
 	timer := time.NewTicker(runloopTickInterval)
 	defer timer.Stop()
 
+	listen()
+
 	for !shuttingDown() {
 		select {
 		case <-timer.C:
-			go tick()
+			// no-op
 		case sig := <-sigs:
 			common.Log.Debugf("received signal: %s", sig)
 			shutdown()
@@ -137,19 +139,23 @@ func shuttingDown() bool {
 	return (atomic.LoadUint32(&closing) > 0)
 }
 
-func tick() error {
-	conn, err := listener.Accept()
-	if err != nil {
-		return fmt.Errorf("pgrok listener failed to accept incoming connection; %s", err.Error())
+func listen() error {
+	for !shuttingDown() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return fmt.Errorf("pgrok listener failed to accept incoming connection; %s", err.Error())
+		}
+
+		common.Log.Debugf("pgrok server accepted client connection from %s", conn.RemoteAddr())
+
+		_conn, err := sshServerConnFactory(conn)
+		if err != nil {
+			return err
+		}
+
+		common.Log.Debugf("pgrok server accepted ssh connection handshake from %s (%s)", _conn.RemoteAddr(), _conn.ClientVersion())
+		time.Sleep(runloopSleepInterval)
 	}
 
-	common.Log.Debugf("pgrok server accepted client connection from %s", conn.RemoteAddr())
-
-	_conn, err := sshServerConnFactory(conn)
-	if err != nil {
-		return err
-	}
-
-	common.Log.Debugf("pgrok server accepted ssh connection handshake from %s (%s)", _conn.RemoteAddr(), _conn.ClientVersion())
 	return nil
 }

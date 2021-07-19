@@ -58,10 +58,12 @@ func (p *pgrokConnection) repl() {
 	timer := time.NewTicker(runloopTickInterval)
 	defer timer.Stop()
 
+	go p.listen()
+
 	for !p.shuttingDown() {
 		select {
 		case <-timer.C:
-			go p.tick()
+			// no-op
 		case channel := <-p.ingressc:
 			go p.handleChannelOpen(channel)
 		case sig := <-p.sigs:
@@ -97,33 +99,37 @@ func (p *pgrokConnection) shuttingDown() bool {
 	return (atomic.LoadUint32(&p.closing) > 0)
 }
 
-func (p *pgrokConnection) tick() error {
-	externalConn, err := p.external.Accept()
-	if err != nil {
-		if !p.shuttingDown() {
-			common.Log.Warningf("pgrok server failed to accept connection on external listener; %s", err.Error())
+func (p *pgrokConnection) listen() error {
+	for !p.shuttingDown() {
+		externalConn, err := p.external.Accept()
+		if err != nil {
+			if !p.shuttingDown() {
+				common.Log.Warningf("pgrok server failed to accept connection on external listener; %s", err.Error())
+			}
+			return err
 		}
-		return err
+
+		common.Log.Debugf("pgrok server accepted remote connection: %s", externalConn.RemoteAddr())
+
+		fchannel, reqc, err := p.conn.OpenChannel(sshChannelTypeForward, nil)
+		if err != nil {
+			common.Log.Warningf("pgrok server failed to open channel of type: %s; %s", sshChannelTypeForward, err.Error())
+			externalConn.Close()
+			return err
+		}
+
+		pipe := &pgrokTunnelPipe{
+			authTimeout: p.authTimeout,
+			external:    externalConn,
+			fchannel:    fchannel,
+			reqc:        reqc,
+			// subject:
+		}
+
+		go pipe.repl()
+		time.Sleep(runloopSleepInterval)
 	}
 
-	common.Log.Debugf("pgrok server accepted remote connection: %s", externalConn.RemoteAddr())
-
-	fchannel, reqc, err := p.conn.OpenChannel(sshChannelTypeForward, nil)
-	if err != nil {
-		common.Log.Warningf("pgrok server failed to open channel of type: %s; %s", sshChannelTypeForward, err.Error())
-		externalConn.Close()
-		return err
-	}
-
-	pipe := &pgrokTunnelPipe{
-		authTimeout: p.authTimeout,
-		external:    externalConn,
-		fchannel:    fchannel,
-		reqc:        reqc,
-		// subject:
-	}
-
-	go pipe.repl()
 	return nil
 }
 
