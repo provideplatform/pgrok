@@ -106,7 +106,7 @@ func (p *pgrokConnection) listen() error {
 			if !p.shuttingDown() {
 				common.Log.Warningf("pgrok server failed to accept connection on external listener; %s", err.Error())
 			}
-			return err
+			continue
 		}
 
 		common.Log.Debugf("pgrok server accepted remote connection: %s", externalConn.RemoteAddr())
@@ -115,7 +115,7 @@ func (p *pgrokConnection) listen() error {
 		if err != nil {
 			common.Log.Warningf("pgrok server failed to open channel of type: %s; %s", sshChannelTypeForward, err.Error())
 			externalConn.Close()
-			return err
+			continue
 		}
 
 		pipe := &pgrokTunnelPipe{

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -143,14 +142,20 @@ func listen() error {
 	for !shuttingDown() {
 		conn, err := listener.Accept()
 		if err != nil {
-			return fmt.Errorf("pgrok listener failed to accept incoming connection; %s", err.Error())
+			if !shuttingDown() {
+				common.Log.Warningf("pgrok listener failed to accept incoming connection; %s", err.Error())
+			}
+			continue
 		}
 
 		common.Log.Debugf("pgrok server accepted client connection from %s", conn.RemoteAddr())
 
 		_conn, err := sshServerConnFactory(conn)
 		if err != nil {
-			return err
+			if !shuttingDown() {
+				common.Log.Warningf("pgrok listener failed to complete ssh connection handshake; %s", err.Error())
+			}
+			continue
 		}
 
 		common.Log.Debugf("pgrok server accepted ssh connection handshake from %s (%s)", _conn.RemoteAddr(), _conn.ClientVersion())
