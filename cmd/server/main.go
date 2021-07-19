@@ -84,7 +84,7 @@ func main() {
 	timer := time.NewTicker(runloopTickInterval)
 	defer timer.Stop()
 
-	listen()
+	go listen()
 
 	for !shuttingDown() {
 		select {
