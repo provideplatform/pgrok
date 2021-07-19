@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -29,11 +30,14 @@ const pgrokClientRequestTypeForwardAddr = "forward-addr"
 const pgrokClientRequestTypeTunnelExpiration = "tunnel-expiration"
 const pgrokClientStatusTickerInterval = 25 * time.Millisecond
 const pgrokClientStatusSleepInterval = 50 * time.Millisecond
-const pgrokConnSleepTimeout = time.Millisecond * 100
-const pgrokConnSessionBufferSleepTimeout = time.Millisecond * 100
+const pgrokConnBufferedIOSleepTimeout = time.Millisecond * 25
 const pgrokDefaultServerHost = "3.234.192.18" //"pgrok.provide.services"
 const pgrokDefaultServerPort = 8022
-const pgrokDefaultTunnelProtocol = "tcp"
+const pgrokDefaultTunnelProtocol = pgrokTunnelProtocolTCP
+
+const pgrokTunnelProtocolHTTP = "http"
+const pgrokTunnelProtocolHTTPS = "https"
+const pgrokTunnelProtocolTCP = "tcp"
 
 type Tunnel struct {
 	Name       *string
@@ -204,7 +208,7 @@ func (t *Tunnel) initSession() {
 			} else if n > 0 {
 				common.Log.Tracef("pgrok tunnel client read %d bytes from ssh stdout stream", n)
 			}
-			time.Sleep(pgrokConnSessionBufferSleepTimeout)
+			time.Sleep(pgrokConnBufferedIOSleepTimeout)
 		}
 	}()
 
@@ -218,7 +222,7 @@ func (t *Tunnel) initSession() {
 			} else if n > 0 {
 				common.Log.Tracef("pgrok tunnel client read %d bytes from ssh stderr stream", n)
 			}
-			time.Sleep(pgrokConnSessionBufferSleepTimeout)
+			time.Sleep(pgrokConnBufferedIOSleepTimeout)
 		}
 	}()
 
@@ -245,7 +249,7 @@ func (t *Tunnel) initSession() {
 				}
 			}
 
-			time.Sleep(pgrokConnSessionBufferSleepTimeout)
+			time.Sleep(pgrokConnBufferedIOSleepTimeout)
 		}
 	}()
 }
@@ -271,7 +275,6 @@ func (t *Tunnel) initChannel() error {
 				req.Reply(true, nil)
 				common.Log.Info("pgrok tunnel client expired;\n\n\tPurchase additional subscription capacity 🥳 🎉")
 				t.shutdown()
-				break
 			case pgrokClientRequestTypeForwardAddr:
 				common.Log.Debugf("pgrok tunnel client received response to %s request: %s", pgrokClientRequestTypeForwardAddr, string(req.Payload))
 				payload := map[string]interface{}{}
@@ -293,6 +296,10 @@ func (t *Tunnel) initChannel() error {
 	proto := make([]byte, 0)
 	if t.Protocol != nil {
 		proto = []byte(*t.Protocol)
+	}
+
+	if !bytes.Equal(proto, []byte(pgrokTunnelProtocolHTTP)) && !bytes.Equal(proto, []byte(pgrokTunnelProtocolHTTPS)) && !bytes.Equal(proto, []byte(pgrokTunnelProtocolTCP)) {
+		return fmt.Errorf("pgrok tunnel client does not support %s protocol", string(proto))
 	}
 
 	_, err = t.channel.SendRequest(pgrokClientRequestTypeForwardAddr, true, proto)
@@ -343,8 +350,8 @@ func (t *Tunnel) forward(channel ssh.Channel) {
 	// channel > local destination
 	go func() {
 		for !t.shuttingDown() {
+			var n int
 			if dest != nil {
-				var n int
 				var err error
 				buffer := make([]byte, pgrokClientBufferSize)
 				if n, err = channel.Read(buffer); err != nil && err != io.EOF {
@@ -363,7 +370,9 @@ func (t *Tunnel) forward(channel ssh.Channel) {
 				}
 			}
 
-			time.Sleep(pgrokConnSessionBufferSleepTimeout)
+			if n == 0 {
+				time.Sleep(pgrokConnBufferedIOSleepTimeout)
+			}
 		}
 
 		once.Do(close)
@@ -372,7 +381,7 @@ func (t *Tunnel) forward(channel ssh.Channel) {
 	go func() {
 		for !t.shuttingDown() {
 			io.Copy(io.Discard, channel.Stderr())
-			time.Sleep(pgrokConnSessionBufferSleepTimeout)
+			time.Sleep(pgrokConnBufferedIOSleepTimeout)
 		}
 
 		once.Do(close)
@@ -381,8 +390,8 @@ func (t *Tunnel) forward(channel ssh.Channel) {
 	// local destination > channel
 	go func() {
 		for !t.shuttingDown() {
+			var n int
 			if dest != nil {
-				var n int
 				var err error
 				buffer := make([]byte, pgrokClientBufferSize)
 				if n, err = dest.Read(buffer); err != nil && err != io.EOF {
@@ -400,7 +409,9 @@ func (t *Tunnel) forward(channel ssh.Channel) {
 				}
 			}
 
-			time.Sleep(pgrokConnSleepTimeout)
+			if n == 0 {
+				time.Sleep(pgrokConnBufferedIOSleepTimeout)
+			}
 		}
 
 		once.Do(close)

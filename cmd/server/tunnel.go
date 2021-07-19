@@ -16,7 +16,7 @@ import (
 )
 
 // pgrokTunnelPipe provides a pipe between an ephemeral external connection and the local
-// address/port being forwarded forward channel
+// address/port being forwarded
 type pgrokTunnelPipe struct {
 	cancelF     context.CancelFunc
 	closing     uint32
@@ -28,6 +28,8 @@ type pgrokTunnelPipe struct {
 	external    net.Conn
 	fchannel    ssh.Channel
 	reqc        <-chan *ssh.Request
+
+	protocol string
 }
 
 func (p *pgrokTunnelPipe) repl() {
