@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
@@ -135,6 +136,20 @@ func (p *pgrokConnection) listen() error {
 		}
 
 		common.Log.Debugf("pgrok server accepted remote connection: %s", externalConn.RemoteAddr())
+
+		if p.protocol != nil && *p.protocol == pgrokTunnelProtocolHTTPS {
+			switch tlsconn := externalConn.(type) {
+			case *tls.Conn:
+				err = tlsconn.Handshake()
+				if err != nil {
+					common.Log.Warningf("pgrok server failed to complete TLS handshake; %s", err.Error())
+					externalConn.Close()
+					continue
+				}
+			default:
+				common.Log.Warning("pgrok server protocol configured as https but external connection not using TLS")
+			}
+		}
 
 		fchannel, reqc, err := p.conn.OpenChannel(sshChannelTypeForward, nil)
 		if err != nil {

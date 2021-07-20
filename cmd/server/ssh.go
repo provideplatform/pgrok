@@ -49,8 +49,9 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 		}
 
 		config := &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
+			Certificates:             []tls.Certificate{cert},
+			MinVersion:               tls.VersionTLS12,
+			PreferServerCipherSuites: true,
 		}
 		externalTLS, err = tls.Listen("tcp", ":0", config)
 		if err != nil {
