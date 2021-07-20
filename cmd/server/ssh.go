@@ -48,7 +48,10 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 			return nil, err
 		}
 
-		config := &tls.Config{Certificates: []tls.Certificate{cert}}
+		config := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   2,
+		}
 		externalTLS, err = tls.Listen("tcp", ":0", config)
 		if err != nil {
 			common.Log.Warningf("pgrok server failed to bind external listener on next ephemeral port; %s", err.Error())
