@@ -38,6 +38,7 @@ type pgrokConnection struct {
 	authTimeout time.Duration
 	conn        *ssh.ServerConn
 	external    net.Listener
+	externalTLS net.Listener
 	ingressc    <-chan ssh.NewChannel
 	reqc        <-chan *ssh.Request
 
@@ -90,7 +91,7 @@ func (p *pgrokConnection) shutdown() {
 	if atomic.AddUint32(&p.closing, 1) == 1 {
 		common.Log.Debug("shutting down pgrok tunnel connection")
 		p.conn.Close()
-		p.external.Close()
+		p.resolveListener().Close()
 		p.cancelF()
 	}
 }
@@ -99,9 +100,33 @@ func (p *pgrokConnection) shuttingDown() bool {
 	return (atomic.LoadUint32(&p.closing) > 0)
 }
 
+func (p *pgrokConnection) resolveListener() net.Listener {
+	var listener net.Listener
+
+	if p.protocol != nil && *p.protocol == pgrokTunnelProtocolHTTPS {
+		listener = p.externalTLS
+
+		if p.external != nil {
+			p.external.Close()
+			p.external = nil
+		}
+	} else {
+		listener = p.external
+
+		if p.externalTLS != nil {
+			p.externalTLS.Close()
+			p.externalTLS = nil
+		}
+	}
+
+	return listener
+}
+
 func (p *pgrokConnection) listen() error {
+	listener := p.resolveListener()
+
 	for !p.shuttingDown() {
-		externalConn, err := p.external.Accept()
+		externalConn, err := listener.Accept()
 		if err != nil {
 			if !p.shuttingDown() {
 				common.Log.Warningf("pgrok server failed to accept connection on external listener; %s", err.Error())
@@ -122,8 +147,8 @@ func (p *pgrokConnection) listen() error {
 			authTimeout: p.authTimeout,
 			external:    externalConn,
 			fchannel:    fchannel,
+			protocol:    *p.protocol,
 			reqc:        reqc,
-			// subject:
 		}
 
 		go pipe.repl()

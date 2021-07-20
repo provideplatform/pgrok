@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/provideplatform/pgrok/common"
 )
@@ -28,7 +29,7 @@ func (c *Client) TunnelFactory(name, localAddr string, serverAddr, protocol, jwt
 	tun := &Tunnel{
 		Name:      &name,
 		LocalAddr: &localAddr,
-		Protocol:  &proto,
+		Protocol:  common.StringOrNil(strings.ToLower(proto)),
 	}
 
 	if jwt != nil {

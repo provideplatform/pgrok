@@ -15,6 +15,10 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+const pgrokTunnelProtocolHTTP = "http"
+const pgrokTunnelProtocolHTTPS = "https"
+const pgrokTunnelProtocolTCP = "tcp"
+
 // pgrokTunnelPipe provides a pipe between an ephemeral external connection and the local
 // address/port being forwarded
 type pgrokTunnelPipe struct {

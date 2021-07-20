@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"net"
@@ -14,6 +15,9 @@ import (
 
 func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 	var err error
+	var external net.Listener
+	var externalTLS net.Listener
+
 	sshconn, ingressc, reqc, err := ssh.NewServerConn(conn, sshServerConfigFactory(conn))
 	if err != nil {
 		common.Log.Warningf("failed to initialize pgrok ssh server connection; failed to complete handshake; %s", err.Error())
@@ -26,9 +30,30 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	external, err := net.Listen("tcp", ":0")
+	// init connection...
+	external, err = net.Listen("tcp", ":0")
 	if err != nil {
 		common.Log.Warningf("pgrok server failed to bind external listener on next ephemeral port; %s", err.Error())
+		return nil, err
+	}
+
+	if os.Getenv("PGROK_SSL_CERTIFICATE") != "" && os.Getenv("PGROK_SSL_CERTIFICATE_PRIVATE_KEY") != "" {
+		// init TLS connection...
+		cert, err := tls.X509KeyPair(
+			[]byte(strings.ReplaceAll(os.Getenv("PGROK_SSL_CERTIFICATE"), "\\n", "\n")),
+			[]byte(strings.ReplaceAll(os.Getenv("PGROK_SSL_CERTIFICATE_PRIVATE_KEY"), "\\n", "\n")),
+		)
+		if err != nil {
+			common.Log.Warningf("pgrok server failed to bind external listener on next ephemeral port; failed to load x509 keypair; %s", err.Error())
+			return nil, err
+		}
+
+		config := &tls.Config{Certificates: []tls.Certificate{cert}}
+		externalTLS, err = tls.Listen("tcp", ":0", config)
+		if err != nil {
+			common.Log.Warningf("pgrok server failed to bind external listener on next ephemeral port; %s", err.Error())
+			return nil, err
+		}
 	}
 
 	addr := external.Addr().String()
@@ -49,6 +74,7 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 		broadcastAddr: &broadcastAddr,
 		conn:          sshconn,
 		external:      external,
+		externalTLS:   externalTLS,
 		ingressc:      ingressc,
 		port:          &port,
 		protocol:      &protocol,
