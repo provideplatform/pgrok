@@ -88,9 +88,9 @@ func (p *pgrokTunnelPipe) shuttingDown() bool {
 func (p *pgrokTunnelPipe) forward() {
 	// external > channel
 	go func() {
+		var n int
 		for !p.shuttingDown() {
 			buffer := make([]byte, sshDefaultBufferSize)
-			var n int
 			var err error
 			if n, err = p.external.Read(buffer); err != nil && err != io.EOF {
 				common.Log.Warningf("pgrok server failed to read from external connection; %s", err.Error())
@@ -108,15 +108,17 @@ func (p *pgrokTunnelPipe) forward() {
 				}
 			}
 
-			time.Sleep(time.Millisecond * 25)
+			if n == 0 {
+				time.Sleep(time.Millisecond * 25)
+			}
 		}
 	}()
 
 	// channel > external
 	go func() {
+		var n int
 		for !p.shuttingDown() {
 			buffer := make([]byte, sshDefaultBufferSize)
-			var n int
 			var err error
 			if n, err = p.fchannel.Read(buffer); err != nil && err != io.EOF {
 				common.Log.Warningf("pgrok server failed to read from channel; %s", err.Error())
@@ -134,7 +136,9 @@ func (p *pgrokTunnelPipe) forward() {
 				}
 			}
 
-			time.Sleep(time.Millisecond * 25)
+			if n == 0 {
+				time.Sleep(time.Millisecond * 25)
+			}
 		}
 	}()
 }
