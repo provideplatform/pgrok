@@ -146,7 +146,7 @@ func (p *pgrokConnection) listen() error {
 					continue
 				}
 			} else {
-				common.Log.Warning("pgrok server protocol configured as https but external connection not using TLS: %s")
+				common.Log.Warning("pgrok server protocol configured as https but external connection not using TLS")
 			}
 		}
 
