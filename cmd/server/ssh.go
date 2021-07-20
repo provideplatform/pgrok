@@ -52,7 +52,7 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 		tlsConfig = &tls.Config{
 			Certificates:             []tls.Certificate{cert},
 			MinVersion:               tls.VersionTLS12,
-			NextProtos:               []string{"http", "http2"},
+			NextProtos:               []string{"http/1.1", "h2"},
 			PreferServerCipherSuites: true,
 		}
 		externalTLS, err = tls.Listen("tcp", ":0", tlsConfig)
