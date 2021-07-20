@@ -138,16 +138,15 @@ func (p *pgrokConnection) listen() error {
 		common.Log.Debugf("pgrok server accepted remote connection: %s", externalConn.RemoteAddr())
 
 		if p.protocol != nil && *p.protocol == pgrokTunnelProtocolHTTPS {
-			switch tlsconn := externalConn.(type) {
-			case *tls.Conn:
+			if tlsconn, tlsconnOk := externalConn.(*tls.Conn); tlsconnOk {
 				err = tlsconn.Handshake()
 				if err != nil {
 					common.Log.Warningf("pgrok server failed to complete TLS handshake; %s", err.Error())
 					externalConn.Close()
 					continue
 				}
-			default:
-				common.Log.Warningf("pgrok server protocol configured as https but external connection not using TLS; type: %v", tlsconn)
+			} else {
+				common.Log.Warning("pgrok server protocol configured as https but external connection not using TLS: %s")
 			}
 		}
 
