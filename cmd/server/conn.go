@@ -146,6 +146,7 @@ func (p *pgrokConnection) listen() error {
 				externalConn.Close()
 				continue
 			}
+			externalConn = tlsconn
 		} else if p.tlsConfig == nil {
 			common.Log.Warning("pgrok server protocol configured as https but external connection not using TLS")
 			externalConn.Close()
