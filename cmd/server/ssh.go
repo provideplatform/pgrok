@@ -54,6 +54,8 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 			common.Log.Warningf("pgrok server failed to bind external listener on next ephemeral port; %s", err.Error())
 			return nil, err
 		}
+
+		common.Log.Debugf("pgrok server configured with TLS listener")
 	}
 
 	addr := external.Addr().String()
