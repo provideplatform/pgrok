@@ -17,6 +17,7 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 	var err error
 	var external net.Listener
 	var externalTLS net.Listener
+	var tlsConfig *tls.Config
 
 	sshconn, ingressc, reqc, err := ssh.NewServerConn(conn, sshServerConfigFactory(conn))
 	if err != nil {
@@ -48,12 +49,12 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 			return nil, err
 		}
 
-		config := &tls.Config{
+		tlsConfig = &tls.Config{
 			Certificates:             []tls.Certificate{cert},
 			MinVersion:               tls.VersionTLS12,
 			PreferServerCipherSuites: true,
 		}
-		externalTLS, err = tls.Listen("tcp", ":0", config)
+		externalTLS, err = tls.Listen("tcp", ":0", tlsConfig)
 		if err != nil {
 			common.Log.Warningf("pgrok server failed to bind external listener on next ephemeral port; %s", err.Error())
 			return nil, err
@@ -85,6 +86,7 @@ func sshServerConnFactory(conn net.Conn) (*ssh.ServerConn, error) {
 		port:          &port,
 		protocol:      &protocol,
 		reqc:          reqc,
+		tlsConfig:     tlsConfig,
 	}
 
 	connections[sessionID] = pconn

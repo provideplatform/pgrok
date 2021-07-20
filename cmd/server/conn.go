@@ -42,6 +42,7 @@ type pgrokConnection struct {
 	externalTLS net.Listener
 	ingressc    <-chan ssh.NewChannel
 	reqc        <-chan *ssh.Request
+	tlsConfig   *tls.Config
 
 	// forwarded address, port. protocol and broadcast address
 	addr          *string
@@ -137,17 +138,18 @@ func (p *pgrokConnection) listen() error {
 
 		common.Log.Debugf("pgrok server accepted remote connection: %s", externalConn.RemoteAddr())
 
-		if p.protocol != nil && *p.protocol == pgrokTunnelProtocolHTTPS {
-			if tlsconn, tlsconnOk := externalConn.(*tls.Conn); tlsconnOk {
-				err = tlsconn.Handshake()
-				if err != nil {
-					common.Log.Warningf("pgrok server failed to complete TLS handshake; %s", err.Error())
-					externalConn.Close()
-					continue
-				}
-			} else {
-				common.Log.Warning("pgrok server protocol configured as https but external connection not using TLS")
+		if p.protocol != nil && *p.protocol == pgrokTunnelProtocolHTTPS && p.tlsConfig != nil {
+			tlsconn := tls.Server(externalConn, p.tlsConfig)
+			err = tlsconn.Handshake()
+			if err != nil {
+				common.Log.Warningf("pgrok server failed to complete TLS handshake; %s", err.Error())
+				externalConn.Close()
+				continue
 			}
+		} else if p.tlsConfig == nil {
+			common.Log.Warning("pgrok server protocol configured as https but external connection not using TLS")
+			externalConn.Close()
+			continue
 		}
 
 		fchannel, reqc, err := p.conn.OpenChannel(sshChannelTypeForward, nil)
