@@ -93,7 +93,12 @@ func (p *pgrokConnection) shutdown() {
 	if atomic.AddUint32(&p.closing, 1) == 1 {
 		common.Log.Debug("shutting down pgrok tunnel connection")
 		p.conn.Close()
-		p.resolveListener().Close()
+
+		listener := p.resolveListener()
+		if listener != nil {
+			listener.Close()
+		}
+
 		p.cancelF()
 	}
 }
