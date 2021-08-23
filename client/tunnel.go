@@ -31,7 +31,7 @@ const pgrokClientRequestTypeTunnelExpiration = "tunnel-expiration"
 const pgrokClientStatusTickerInterval = 25 * time.Millisecond
 const pgrokClientStatusSleepInterval = 50 * time.Millisecond
 const pgrokConnBufferedIOSleepTimeout = time.Millisecond * 10
-const pgrokDefaultServerHost = "3.234.192.18" //"pgrok.provide.services"
+const pgrokDefaultServerHost = "0.pgrok.provide.services"
 const pgrokDefaultServerPort = 8022
 const pgrokDefaultTunnelProtocol = pgrokTunnelProtocolTCP
 
