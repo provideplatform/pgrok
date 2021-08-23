@@ -30,7 +30,7 @@ const pgrokClientRequestTypeForwardAddr = "forward-addr"
 const pgrokClientRequestTypeTunnelExpiration = "tunnel-expiration"
 const pgrokClientStatusTickerInterval = 25 * time.Millisecond
 const pgrokClientStatusSleepInterval = 50 * time.Millisecond
-const pgrokConnBufferedIOSleepTimeout = time.Millisecond * 25
+const pgrokConnBufferedIOSleepTimeout = time.Millisecond * 10
 const pgrokDefaultServerHost = "3.234.192.18" //"pgrok.provide.services"
 const pgrokDefaultServerPort = 8022
 const pgrokDefaultTunnelProtocol = pgrokTunnelProtocolTCP
@@ -409,9 +409,7 @@ func (t *Tunnel) forward(channel ssh.Channel) {
 				}
 			}
 
-			if n == 0 {
-				time.Sleep(pgrokConnBufferedIOSleepTimeout)
-			}
+			time.Sleep(pgrokConnBufferedIOSleepTimeout)
 		}
 
 		once.Do(close)

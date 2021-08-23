@@ -108,9 +108,7 @@ func (p *pgrokTunnelPipe) forward() {
 				}
 			}
 
-			if n == 0 {
-				time.Sleep(time.Millisecond * 25)
-			}
+			time.Sleep(time.Millisecond * 10)
 		}
 	}()
 
@@ -136,9 +134,7 @@ func (p *pgrokTunnelPipe) forward() {
 				}
 			}
 
-			if n == 0 {
-				time.Sleep(time.Millisecond * 25)
-			}
+			time.Sleep(time.Millisecond * 10)
 		}
 	}()
 }
