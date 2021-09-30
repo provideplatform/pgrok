@@ -17,7 +17,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const pgrokSubscriptionDefaultFreeTierTunnelDuration = time.Day * 7
+const pgrokSubscriptionDefaultFreeTierTunnelDuration = time.Hour * 24 * 7
 const pgrokSubscriptionDefaultCapacity = 0
 
 const sshChannelTypeForward = "forward"
