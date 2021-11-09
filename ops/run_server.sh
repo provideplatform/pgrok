@@ -30,7 +30,7 @@ if [[ -z "${DATABASE_HOST}" ]]; then
 fi
 
 if [[ -z "${DATABASE_NAME}" ]]; then
-  DATABASE_NAME=baselineproxy_dev
+  DATABASE_NAME=baseline_dev
 fi
 
 if [[ -z "${DATABASE_USER}" ]]; then

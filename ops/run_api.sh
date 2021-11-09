@@ -30,11 +30,11 @@ if [[ -z "${DATABASE_HOST}" ]]; then
 fi
 
 if [[ -z "${DATABASE_NAME}" ]]; then
-  DATABASE_NAME=baselineproxy_dev
+  DATABASE_NAME=pgrok_dev
 fi
 
 if [[ -z "${DATABASE_USER}" ]]; then
-  DATABASE_USER=baseline-proxy
+  DATABASE_USER=pgrok
 fi
 
 if [[ -z "${DATABASE_PASSWORD}" ]]; then
