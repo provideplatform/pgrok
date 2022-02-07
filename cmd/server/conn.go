@@ -61,7 +61,7 @@ func (p *pgrokConnection) repl() {
 	p.installSignalHandlers()
 
 	p.mutex = &sync.Mutex{}
-	ssh.DiscardRequests(p.reqc)
+	go ssh.DiscardRequests(p.reqc)
 
 	timer := time.NewTicker(runloopTickInterval)
 	defer timer.Stop()
@@ -101,7 +101,6 @@ func (p *pgrokConnection) repl() {
 		case <-p.shutdownCtx.Done():
 			close(p.sigs)
 		default:
-			ssh.DiscardRequests(p.reqc)
 			time.Sleep(runloopSleepInterval)
 		}
 	}
