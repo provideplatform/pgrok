@@ -96,9 +96,11 @@ func (p *pgrokTunnelPipe) forward() {
 			if n, err = p.external.Read(buffer); err != nil && err != io.EOF {
 				common.Log.Warningf("pgrok server failed to read from external connection; %s", err.Error())
 
-				_, err = p.fchannel.SendRequest(sshRequestTypePing, true, []byte{})
+				ok, err := p.fchannel.SendRequest(sshRequestTypePing, true, []byte{})
 				if err != nil {
 					common.Log.Warningf("pgrok server failed to send client ping request to channel; %s", err.Error())
+				}
+				if !ok || err != nil {
 					p.shutdown()
 				}
 			} else if n > 0 {
