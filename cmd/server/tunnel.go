@@ -77,6 +77,7 @@ func (p *pgrokTunnelPipe) shutdown() {
 		common.Log.Debug("shutting down pgrok tunnel pipe")
 		p.external.Close()
 		p.fchannel.Close()
+		close(p.sigs)
 		p.cancelF()
 	}
 }

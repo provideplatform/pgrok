@@ -89,7 +89,7 @@ func (p *pgrokConnection) repl() {
 					}
 
 					if i == len(p.pipes) {
-						common.Log.Debugf("pgrokConnection closing... all tunnels shutdown: %s", *p.addr)
+						common.Log.Debugf("pgrok connection repl closing... all tunnels shutdown: %s", *p.addr)
 						p.shutdown()
 					}
 				}()
@@ -128,6 +128,7 @@ func (p *pgrokConnection) shutdown() {
 			listener.Close()
 		}
 
+		close(p.sigs)
 		p.cancelF()
 	}
 }
@@ -141,18 +142,18 @@ func (p *pgrokConnection) resolveListener() net.Listener {
 
 	if p.protocol != nil && *p.protocol == pgrokTunnelProtocolHTTPS {
 		listener = p.externalTLS
-
-		if p.external != nil {
-			p.external.Close()
-			p.external = nil
-		}
 	} else {
 		listener = p.external
+	}
 
-		if p.externalTLS != nil {
-			p.externalTLS.Close()
-			p.externalTLS = nil
-		}
+	if p.external != nil {
+		p.external.Close()
+		p.external = nil
+	}
+
+	if p.externalTLS != nil {
+		p.externalTLS.Close()
+		p.externalTLS = nil
 	}
 
 	return listener
