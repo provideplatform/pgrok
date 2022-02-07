@@ -19,6 +19,7 @@ import (
 
 const pgrokSubscriptionDefaultFreeTierTunnelDuration = time.Hour * 1
 const pgrokTunnelLivenessTimeout = time.Second * 5
+const pgrokTunnelLivenessGracePeriod = time.Second * 5
 const pgrokSubscriptionDefaultCapacity = 0
 
 const sshChannelTypeForward = "forward"
@@ -70,6 +71,11 @@ func (p *pgrokConnection) repl() {
 	for !p.shuttingDown() {
 		select {
 		case <-timer.C:
+			if p.lastLivenessTimestamp == nil {
+				time.Sleep(pgrokTunnelLivenessGracePeriod)
+				continue
+			}
+
 			if p.lastLivenessTimestamp == nil || time.Since(*p.lastLivenessTimestamp) >= pgrokTunnelLivenessTimeout {
 				timestamp := time.Now()
 				p.lastLivenessTimestamp = &timestamp
