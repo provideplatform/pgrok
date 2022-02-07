@@ -81,6 +81,9 @@ func (p *pgrokConnection) repl() {
 
 			if time.Since(*p.lastLivenessTimestamp) >= pgrokTunnelLivenessTimeout {
 				go func() {
+					p.mutex.Lock()
+					defer p.mutex.Unlock()
+
 					pipes := make([]*pgrokTunnelPipe, 0)
 					for _, pipe := range p.pipes {
 						ok, err := pipe.fchannel.SendRequest(sshRequestTypePing, true, []byte{})
@@ -92,15 +95,12 @@ func (p *pgrokConnection) repl() {
 						} else {
 							pipes = append(pipes, pipe)
 						}
+					}
 
-						p.mutex.Lock()
-						defer p.mutex.Unlock()
+					p.pipes = pipes
 
-						p.pipes = pipes
-
-						if len(p.pipes) == 0 {
-							p.shutdown()
-						}
+					if len(p.pipes) == 0 {
+						p.shutdown()
 					}
 				}()
 
@@ -138,7 +138,6 @@ func (p *pgrokConnection) shutdown() {
 			listener.Close()
 		}
 
-		close(p.sigs)
 		p.cancelF()
 	}
 }
