@@ -28,6 +28,7 @@ const pgrokClientBufferSize = 512
 const pgrokClientChannelTypeForward = "forward"
 const pgrokClientRequestTypeForwardAddr = "forward-addr"
 const pgrokClientRequestTypeTunnelExpiration = "tunnel-expiration"
+const pgrokClientRequestTypePing = "PING"
 const pgrokClientStatusTickerInterval = 25 * time.Millisecond
 const pgrokClientStatusSleepInterval = 50 * time.Millisecond
 const pgrokConnBufferedIOSleepTimeout = time.Millisecond * 10
@@ -288,6 +289,9 @@ func (t *Tunnel) initChannel() error {
 					common.Log.Debugf("pgrok tunnel client resolved address: %s", *t.RemoteAddr)
 				}
 				req.Reply(true, nil)
+			case pgrokClientRequestTypePing:
+				common.Log.Debug("pgrok tunnel client received ping request")
+				req.Reply(true, []byte("pong"))
 			}
 		}
 	}()

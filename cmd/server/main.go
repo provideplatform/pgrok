@@ -27,6 +27,7 @@ const sshMaxAuthTries = 1
 
 const sshRequestTypePTY = "pty-req"
 const sshRequestTypeShell = "shell"
+const sshRequestTypePing = "ping"
 const sshRequestTypeWindowChange = "window-change"
 
 var (
