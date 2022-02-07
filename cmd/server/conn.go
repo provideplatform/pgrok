@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -187,6 +188,9 @@ func (p *pgrokConnection) listen() error {
 		fchannel, reqc, err := p.conn.OpenChannel(sshChannelTypeForward, nil)
 		if err != nil {
 			common.Log.Warningf("pgrok server failed to open channel of type: %s; %s", sshChannelTypeForward, err.Error())
+			if err == io.EOF {
+				p.shutdown()
+			}
 			externalConn.Close()
 			continue
 		}
