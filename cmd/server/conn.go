@@ -89,9 +89,9 @@ func (p *pgrokConnection) repl() {
 						p.shutdown()
 					}
 				}()
-			}
 
-			p.lastLivenessTimestamp = &timestamp
+				p.lastLivenessTimestamp = &timestamp
+			}
 		case channel := <-p.ingressc:
 			go p.handleChannelOpen(channel)
 		case sig := <-p.sigs:
