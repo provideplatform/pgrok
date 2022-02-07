@@ -18,6 +18,7 @@ import (
 )
 
 const pgrokSubscriptionDefaultFreeTierTunnelDuration = time.Hour * 1
+const pgrokTunnelLivenessTimeout = time.Second * 5
 const pgrokSubscriptionDefaultCapacity = 0
 
 const sshChannelTypeForward = "forward"
@@ -44,6 +45,9 @@ type pgrokConnection struct {
 	reqc        <-chan *ssh.Request
 	tlsConfig   *tls.Config
 
+	pipes                 []*pgrokTunnelPipe
+	lastLivenessTimestamp *time.Time
+
 	// forwarded address, port. protocol and broadcast address
 	addr          *string
 	broadcastAddr *string
@@ -66,7 +70,22 @@ func (p *pgrokConnection) repl() {
 	for !p.shuttingDown() {
 		select {
 		case <-timer.C:
-			// no-op
+			if p.lastLivenessTimestamp == nil || time.Since(*p.lastLivenessTimestamp) >= pgrokTunnelLivenessTimeout {
+				timestamp := time.Now()
+				p.lastLivenessTimestamp = &timestamp
+
+				i := 0
+				for _, pipe := range p.pipes {
+					if pipe.shuttingDown() {
+						i++
+					}
+				}
+
+				if i == len(p.pipes) {
+					common.Log.Debugf("pgrokConnection closing... all tunnels shutdown: %s", *p.addr)
+					p.shutdown()
+				}
+			}
 		case channel := <-p.ingressc:
 			go p.handleChannelOpen(channel)
 		case sig := <-p.sigs:
@@ -173,6 +192,8 @@ func (p *pgrokConnection) listen() error {
 			protocol:    *p.protocol,
 			reqc:        reqc,
 		}
+
+		p.pipes = append(p.pipes, pipe)
 
 		go pipe.repl()
 		time.Sleep(runloopSleepInterval)
