@@ -125,7 +125,6 @@ func (p *pgrokTunnelPipe) forward() {
 		for !p.shuttingDown() {
 			buffer := make([]byte, sshDefaultBufferSize)
 			var err error
-			p.fchannel.SendRequest()
 			if n, err = p.fchannel.Read(buffer); err != nil && err != io.EOF {
 				common.Log.Warningf("pgrok server failed to read from channel; %s", err.Error())
 			} else if n > 0 {
