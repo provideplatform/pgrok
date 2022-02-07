@@ -90,6 +90,8 @@ func (p *pgrokTunnelPipe) forward() {
 	go func() {
 		var n int
 		for !p.shuttingDown() {
+			p.external.SetDeadline(time.Now().Add(pgrokTunnelIdleTimeout))
+
 			buffer := make([]byte, sshDefaultBufferSize)
 			var err error
 			if n, err = p.external.Read(buffer); err != nil && err != io.EOF {
@@ -108,7 +110,7 @@ func (p *pgrokTunnelPipe) forward() {
 				}
 			}
 
-			time.Sleep(time.Millisecond * 10)
+			time.Sleep(time.Millisecond * 25)
 		}
 	}()
 
@@ -116,6 +118,8 @@ func (p *pgrokTunnelPipe) forward() {
 	go func() {
 		var n int
 		for !p.shuttingDown() {
+			p.external.SetDeadline(time.Now().Add(pgrokTunnelIdleTimeout))
+
 			buffer := make([]byte, sshDefaultBufferSize)
 			var err error
 			if n, err = p.fchannel.Read(buffer); err != nil && err != io.EOF {
@@ -134,7 +138,7 @@ func (p *pgrokTunnelPipe) forward() {
 				}
 			}
 
-			time.Sleep(time.Millisecond * 10)
+			time.Sleep(time.Millisecond * 25)
 		}
 	}()
 }
