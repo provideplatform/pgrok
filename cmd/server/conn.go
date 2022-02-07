@@ -71,6 +71,14 @@ func (p *pgrokConnection) repl() {
 
 	go p.listen()
 
+	go func() {
+		err := p.conn.Wait()
+		if err != nil {
+			common.Log.Warningf("pgrok connection closed; %s", err.Error())
+			p.shutdown()
+		}
+	}()
+
 	for !p.shuttingDown() {
 		select {
 		case <-timer.C:
@@ -84,13 +92,12 @@ func (p *pgrokConnection) repl() {
 					p.mutex.Lock()
 					defer p.mutex.Unlock()
 
-					ok, _, err := p.conn.SendRequest(sshRequestTypePing, true, []byte{})
-					if !ok || err != nil {
+					_, _, err := p.conn.SendRequest(sshRequestTypePing, false, []byte{})
+					if err != nil {
 						if err != nil {
 							common.Log.Warningf("pgrok server failed to send ping request to connection channel; %s", err.Error())
+							p.shutdown()
 						}
-
-						p.shutdown()
 					}
 				}()
 
