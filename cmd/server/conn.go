@@ -49,7 +49,7 @@ type pgrokConnection struct {
 	reqc        <-chan *ssh.Request
 	tlsConfig   *tls.Config
 
-	pipes                 []*pgrokTunnelPipe
+	// pipes                 []*pgrokTunnelPipe
 	lastLivenessTimestamp *time.Time
 
 	// forwarded address, port. protocol and broadcast address
@@ -79,17 +79,13 @@ func (p *pgrokConnection) repl() {
 				p.lastLivenessTimestamp = &timestamp
 			}
 
-			if len(p.pipes) > 0 && time.Since(*p.lastLivenessTimestamp) >= pgrokTunnelLivenessTimeout {
+			if time.Since(*p.lastLivenessTimestamp) >= pgrokTunnelLivenessTimeout {
 				go func() {
-					i := 0
-					for _, pipe := range p.pipes {
-						if pipe.shuttingDown() {
-							i++
-						}
+					ok, _, err := p.conn.SendRequest(sshRequestTypePing, true, []byte{})
+					if err != nil {
+						common.Log.Warningf("pgrok server failed to send client ping request; %s", err.Error())
 					}
-
-					if i == len(p.pipes) {
-						common.Log.Debugf("pgrok connection repl closing... all tunnels shutdown: %s", *p.addr)
+					if !ok || err != nil {
 						p.shutdown()
 					}
 				}()
@@ -206,7 +202,7 @@ func (p *pgrokConnection) listen() error {
 			reqc:        reqc,
 		}
 
-		p.pipes = append(p.pipes, pipe)
+		// p.pipes = append(p.pipes, pipe)
 
 		go pipe.repl()
 		time.Sleep(runloopSleepInterval)
