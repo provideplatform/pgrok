@@ -142,18 +142,18 @@ func (p *pgrokConnection) resolveListener() net.Listener {
 
 	if p.protocol != nil && *p.protocol == pgrokTunnelProtocolHTTPS {
 		listener = p.externalTLS
+
+		if p.external != nil {
+			p.external.Close()
+			p.external = nil
+		}
 	} else {
 		listener = p.external
-	}
 
-	if p.external != nil {
-		p.external.Close()
-		p.external = nil
-	}
-
-	if p.externalTLS != nil {
-		p.externalTLS.Close()
-		p.externalTLS = nil
+		if p.externalTLS != nil {
+			p.externalTLS.Close()
+			p.externalTLS = nil
+		}
 	}
 
 	return listener
