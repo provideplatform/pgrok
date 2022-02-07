@@ -71,26 +71,28 @@ func (p *pgrokConnection) repl() {
 	for !p.shuttingDown() {
 		select {
 		case <-timer.C:
-			if p.lastLivenessTimestamp == nil {
-				time.Sleep(pgrokTunnelLivenessGracePeriod)
-				continue
-			}
-
 			if p.lastLivenessTimestamp == nil || time.Since(*p.lastLivenessTimestamp) >= pgrokTunnelLivenessTimeout {
-				timestamp := time.Now()
-				p.lastLivenessTimestamp = &timestamp
-
-				i := 0
-				for _, pipe := range p.pipes {
-					if pipe.shuttingDown() {
-						i++
+				go func() {
+					if p.lastLivenessTimestamp == nil {
+						time.Sleep(pgrokTunnelLivenessGracePeriod)
+						return
 					}
-				}
 
-				if i == len(p.pipes) {
-					common.Log.Debugf("pgrokConnection closing... all tunnels shutdown: %s", *p.addr)
-					p.shutdown()
-				}
+					timestamp := time.Now()
+					p.lastLivenessTimestamp = &timestamp
+
+					i := 0
+					for _, pipe := range p.pipes {
+						if pipe.shuttingDown() {
+							i++
+						}
+					}
+
+					if i == len(p.pipes) {
+						common.Log.Debugf("pgrokConnection closing... all tunnels shutdown: %s", *p.addr)
+						p.shutdown()
+					}
+				}()
 			}
 		case channel := <-p.ingressc:
 			go p.handleChannelOpen(channel)
