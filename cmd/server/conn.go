@@ -71,11 +71,10 @@ func (p *pgrokConnection) repl() {
 	for !p.shuttingDown() {
 		select {
 		case <-timer.C:
-			if p.lastLivenessTimestamp == nil || time.Since(*p.lastLivenessTimestamp) >= pgrokTunnelLivenessTimeout {
+			if len(p.pipes) > 0 && p.lastLivenessTimestamp == nil || time.Since(*p.lastLivenessTimestamp) >= pgrokTunnelLivenessTimeout {
 				go func() {
 					if p.lastLivenessTimestamp == nil {
 						time.Sleep(pgrokTunnelLivenessGracePeriod)
-						return
 					}
 
 					timestamp := time.Now()
