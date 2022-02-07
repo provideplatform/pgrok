@@ -49,7 +49,7 @@ type pgrokConnection struct {
 	reqc        <-chan *ssh.Request
 	tlsConfig   *tls.Config
 
-	pipes                 []*pgrokTunnelPipe
+	// pipes                 []*pgrokTunnelPipe
 	lastLivenessTimestamp *time.Time
 
 	// forwarded address, port. protocol and broadcast address
@@ -128,10 +128,6 @@ func (p *pgrokConnection) installSignalHandlers() {
 func (p *pgrokConnection) shutdown() {
 	if atomic.AddUint32(&p.closing, 1) == 1 {
 		common.Log.Debug("shutting down pgrok tunnel connection")
-		for _, pipe := range p.pipes {
-			pipe.shutdown()
-		}
-
 		p.conn.Close()
 
 		listener := p.resolveListener()
@@ -216,10 +212,10 @@ func (p *pgrokConnection) listen() error {
 			reqc:        reqc,
 		}
 
-		p.mutex.Lock()
-		defer p.mutex.Unlock()
+		// p.mutex.Lock()
+		// defer p.mutex.Unlock()
 
-		p.pipes = append(p.pipes, pipe)
+		// p.pipes = append(p.pipes, pipe)
 
 		go pipe.repl()
 		time.Sleep(runloopSleepInterval)
