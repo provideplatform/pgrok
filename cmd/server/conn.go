@@ -22,6 +22,7 @@ const pgrokSubscriptionDefaultFreeTierTunnelDuration = time.Hour * 1
 const pgrokTunnelIdleTimeout = time.Second * 10
 const pgrokTunnelLivenessTimeout = time.Second * 5
 const pgrokTunnelLivenessGracePeriod = time.Second * 5
+const pgrokTunnelPipeInterval = time.Millisecond * 50
 const pgrokSubscriptionDefaultCapacity = 0
 
 const sshChannelTypeForward = "forward"

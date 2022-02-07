@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net"
 	"os"
@@ -91,21 +90,16 @@ func (p *pgrokTunnelPipe) forward() {
 	go func() {
 		var n int
 		for !p.shuttingDown() {
-			p.external.SetDeadline(time.Now().Add(pgrokTunnelIdleTimeout))
-
 			buffer := make([]byte, sshDefaultBufferSize)
 			var err error
+			p.external.SetDeadline(time.Now().Add(pgrokTunnelIdleTimeout))
 			if n, err = p.external.Read(buffer); err != nil && err != io.EOF {
 				common.Log.Warningf("pgrok server failed to read from external connection; %s", err.Error())
-
-				if errors.Is(err, os.ErrDeadlineExceeded) {
-					p.shutdown()
-				}
 			} else if n > 0 {
 				common.Log.Tracef("pgrok server read %d bytes from external connection", n)
 				i, err := p.fchannel.Write(buffer[0:n])
 				if err != nil {
-					if err == io.EOF || errors.Is(err, os.ErrDeadlineExceeded) {
+					if err == io.EOF {
 						p.shutdown()
 					} else {
 						common.Log.Warningf("pgrok server failed to write from external connection to channel; %s", err.Error())
@@ -115,7 +109,7 @@ func (p *pgrokTunnelPipe) forward() {
 				}
 			}
 
-			time.Sleep(time.Millisecond * 25)
+			time.Sleep(time.Millisecond * 50)
 		}
 	}()
 
@@ -123,21 +117,16 @@ func (p *pgrokTunnelPipe) forward() {
 	go func() {
 		var n int
 		for !p.shuttingDown() {
-			p.external.SetDeadline(time.Now().Add(pgrokTunnelIdleTimeout))
-
 			buffer := make([]byte, sshDefaultBufferSize)
 			var err error
 			if n, err = p.fchannel.Read(buffer); err != nil && err != io.EOF {
 				common.Log.Warningf("pgrok server failed to read from channel; %s", err.Error())
-
-				if errors.Is(err, os.ErrDeadlineExceeded) {
-					p.shutdown()
-				}
 			} else if n > 0 {
 				common.Log.Tracef("pgrok server read %d bytes from channel", n)
+				p.external.SetDeadline(time.Now().Add(pgrokTunnelIdleTimeout))
 				i, err := p.external.Write(buffer[0:n])
 				if err != nil {
-					if err == io.EOF || errors.Is(err, os.ErrDeadlineExceeded) {
+					if err == io.EOF {
 						p.shutdown()
 					} else {
 						common.Log.Warningf("pgrok server failed to write from channel to external connection; %s", err.Error())
@@ -147,7 +136,7 @@ func (p *pgrokTunnelPipe) forward() {
 				}
 			}
 
-			time.Sleep(time.Millisecond * 25)
+			time.Sleep(time.Millisecond * 50)
 		}
 	}()
 }
