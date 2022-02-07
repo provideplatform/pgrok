@@ -49,7 +49,7 @@ type pgrokConnection struct {
 	reqc        <-chan *ssh.Request
 	tlsConfig   *tls.Config
 
-	pipes                 []*pgrokTunnelPipe
+	// pipes                 []*pgrokTunnelPipe
 	lastLivenessTimestamp *time.Time
 
 	// forwarded address, port. protocol and broadcast address
@@ -84,22 +84,12 @@ func (p *pgrokConnection) repl() {
 					p.mutex.Lock()
 					defer p.mutex.Unlock()
 
-					pipes := make([]*pgrokTunnelPipe, 0)
-					for _, pipe := range p.pipes {
-						ok, err := pipe.fchannel.SendRequest(sshRequestTypePing, true, []byte{})
+					ok, _, err := p.conn.SendRequest(sshRequestTypePing, true, []byte{})
+					if !ok || err != nil {
 						if err != nil {
-							common.Log.Warningf("pgrok server failed to send client ping request to channel; %s", err.Error())
+							common.Log.Warningf("pgrok server failed to send ping request to connection channel; %s", err.Error())
 						}
-						if !ok || err != nil {
-							pipe.shutdown()
-						} else {
-							pipes = append(pipes, pipe)
-						}
-					}
 
-					p.pipes = pipes
-
-					if len(p.pipes) == 0 {
 						p.shutdown()
 					}
 				}()
@@ -215,10 +205,10 @@ func (p *pgrokConnection) listen() error {
 			reqc:        reqc,
 		}
 
-		p.mutex.Lock()
-		defer p.mutex.Unlock()
+		// p.mutex.Lock()
+		// defer p.mutex.Unlock()
 
-		p.pipes = append(p.pipes, pipe)
+		// p.pipes = append(p.pipes, pipe)
 
 		go pipe.repl()
 		time.Sleep(runloopSleepInterval)
