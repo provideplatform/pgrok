@@ -100,7 +100,7 @@ func (p *pgrokTunnelPipe) forward() {
 				common.Log.Tracef("pgrok server read %d bytes from external connection", n)
 				i, err := p.fchannel.Write(buffer[0:n])
 				if err != nil {
-					if err == io.EOF {
+					if err == io.EOF || err == os.ErrDeadlineExceeded {
 						p.shutdown()
 					} else {
 						common.Log.Warningf("pgrok server failed to write from external connection to channel; %s", err.Error())
@@ -128,7 +128,7 @@ func (p *pgrokTunnelPipe) forward() {
 				common.Log.Tracef("pgrok server read %d bytes from channel", n)
 				i, err := p.external.Write(buffer[0:n])
 				if err != nil {
-					if err == io.EOF {
+					if err == io.EOF || err == os.ErrDeadlineExceeded {
 						p.shutdown()
 					} else {
 						common.Log.Warningf("pgrok server failed to write from channel to external connection; %s", err.Error())
