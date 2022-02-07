@@ -71,15 +71,13 @@ func (p *pgrokConnection) repl() {
 	for !p.shuttingDown() {
 		select {
 		case <-timer.C:
-			if len(p.pipes) > 0 && (p.lastLivenessTimestamp == nil || time.Since(*p.lastLivenessTimestamp) >= pgrokTunnelLivenessTimeout) {
+			timestamp := time.Now()
+			if p.lastLivenessTimestamp == nil {
+				p.lastLivenessTimestamp = &timestamp
+			}
+
+			if len(p.pipes) > 0 && time.Since(*p.lastLivenessTimestamp) >= pgrokTunnelLivenessTimeout {
 				go func() {
-					if p.lastLivenessTimestamp == nil {
-						time.Sleep(pgrokTunnelLivenessGracePeriod)
-					}
-
-					timestamp := time.Now()
-					p.lastLivenessTimestamp = &timestamp
-
 					i := 0
 					for _, pipe := range p.pipes {
 						if pipe.shuttingDown() {
@@ -93,6 +91,8 @@ func (p *pgrokConnection) repl() {
 					}
 				}()
 			}
+
+			p.lastLivenessTimestamp = &timestamp
 		case channel := <-p.ingressc:
 			go p.handleChannelOpen(channel)
 		case sig := <-p.sigs:
