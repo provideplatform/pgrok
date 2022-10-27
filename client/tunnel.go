@@ -290,8 +290,10 @@ func (t *Tunnel) initChannel() error {
 			switch req.Type {
 			case pgrokClientRequestTypeTunnelExpiration:
 				req.Reply(true, nil)
-				common.Log.Info("pgrok tunnel client expired;\n\n\tPurchase additional subscription capacity 🥳 🎉")
-				t.shutdown()
+
+				// FIXME-- uncomment below after subscription support is added
+				// common.Log.Info("pgrok tunnel client expired;\n\n\tPurchase additional subscription capacity 🥳 🎉")
+				// t.shutdown()
 			case pgrokClientRequestTypeForwardAddr:
 				common.Log.Debugf("pgrok tunnel client received response to %s request: %s", pgrokClientRequestTypeForwardAddr, string(req.Payload))
 				payload := map[string]interface{}{}
