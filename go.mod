@@ -10,5 +10,5 @@ require (
 	github.com/kthomas/go-redisutil v0.0.0-20210621163534-1f741c230b1f
 	github.com/kthomas/go-self-signed-cert v0.0.0-20200602041729-f9878375d46e
 	github.com/provideplatform/provide-go v0.0.0-20210624064849-d7328258f0d8
-	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a
+	golang.org/x/crypto v0.1.0
 )
